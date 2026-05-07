@@ -41,7 +41,30 @@ SCRIPT_SCHEMA = {
         "title_suggestions": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "3-5 YouTube title options optimized for clicks.",
+            "description": "Exactly 5 YouTube title options optimized for clicks.",
+        },
+        "description": {
+            "type": "string",
+            "description": (
+                "SEO-optimized YouTube video description. The first two lines are keyword-dense "
+                "and under 125 characters combined, followed by bullet points summarizing the video, "
+                "followed by relevant hashtags."
+            ),
+        },
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "15 to 20 YouTube search tags mixing broad and specific terms with no hash symbols.",
+        },
+        "chapters": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": 'Timestamped chapter strings in the format "00:00 Chapter Name"; empty for shorts.',
+        },
+        "hook_type": {
+            "type": "string",
+            "enum": ["shock", "question", "story", "listicle", "counter-intuitive", "challenge"],
+            "description": "Classification of the opening hook style.",
         },
         "estimated_duration": {
             "type": "string",
@@ -52,7 +75,17 @@ SCRIPT_SCHEMA = {
             "description": "The tone/style of the script, e.g. 'energetic', 'educational', 'conversational'.",
         },
     },
-    "required": ["video_script", "on_screen_notes", "title_suggestions", "estimated_duration", "tone"],
+    "required": [
+        "video_script",
+        "on_screen_notes",
+        "title_suggestions",
+        "description",
+        "tags",
+        "chapters",
+        "hook_type",
+        "estimated_duration",
+        "tone",
+    ],
 }
 
 SCENES_SCHEMA = {
@@ -117,6 +150,25 @@ CLIP_SELECTOR_SCHEMA = {
         }
     },
     "required": ["selections"],
+}
+
+CLIP_SCORER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scored_clips": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "clip_id": {"type": "string"},
+                    "score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "reason": {"type": "string"},
+                },
+                "required": ["clip_id", "score", "reason"],
+            },
+        }
+    },
+    "required": ["scored_clips"],
 }
 
 
@@ -229,33 +281,56 @@ def _generate_json(
 # Public API
 # ---------------------------------------------------------------------------
 
-def generate_script(idea: str, video_format: str, language: str = "english") -> dict[str, Any]:
+def generate_script(idea: str, video_format: str, language: str = "english", video_length: str = "auto") -> dict[str, Any]:
     """
     Generate a production-ready YouTube video script from a raw idea.
 
-    Word-count targets:
-    - Shorts: 80–100 spoken words (45–60 seconds at ~110 wpm)
-    - Long:   1400–1800 spoken words (8–12 minutes at ~140 wpm)
-
-    No CTA is generated — this is a pure video script.
+    Presets:
+    - auto: AI decides best length
+    - short: ~60 seconds (80-120 words)
+    - medium: 3-5 minutes (450-700 words)
+    - long: 10+ minutes (1400-1800 words)
     """
     if video_format == "shorts":
+        # Shorts are always short-form, ignore length preset if it's too long
         length_rules = (
-            "Target exactly 80-100 spoken words total. "
+            "Target exactly 80-120 spoken words total. "
             "Start with a strong hook (first 1-2 sentences) to grab attention instantly. "
             "Fast pacing. No chapter structure. No calls to action."
         )
     else:
-        length_rules = (
-            "Target 1400-1800 spoken words total. "
-            "Start with an engaging hook (50-80 words). The rest covers the topic thoroughly with clear structure. "
+        # Long-form presets
+        if video_length == "short":
+            length_rules = "Target 120-200 spoken words (~1-2 mins). Brief and punchy overview."
+        elif video_length == "medium":
+            length_rules = "Target 450-700 spoken words (~3-5 mins). Detailed exploration with good depth."
+        elif video_length == "long":
+            length_rules = "Target 1400-1800 spoken words (~10-12 mins). Comprehensive, deep-dive coverage."
+        else: # auto
+            length_rules = (
+                "Analyze the idea complexity and decide the optimal length. "
+                "Target anywhere from 300 to 1500 words. "
+                "More complex ideas get more words. If the idea is simple, keep it concise."
+            )
+        
+        length_rules += (
+            " Start with an engaging hook. The rest covers the topic thoroughly with clear structure. "
             "Include retention beats and smooth section transitions. No calls to action."
         )
 
     system_prompt = (
-        "You are an expert YouTube scriptwriter. "
-        "You write clean, engaging video scripts — not marketing copy. "
-        "Never include calls to action, subscribe reminders, or channel promotion. "
+        "You are an elite YouTube scriptwriter who has written for channels with over 1 million subscribers. "
+        "Scripts must feel like a real creator talking naturally, not a blog post being read aloud. "
+        "You deeply understand YouTube retention mechanics: pattern interrupts, open loops, curiosity gaps, "
+        "and re-engagement beats every 60 to 90 seconds in long videos. "
+        "The first sentence of every script must be a hard-hitting statement, a counter-intuitive claim, "
+        "or a shocking question that makes the viewer stop scrolling within 3 seconds. "
+        "The script must never start with 'In this video', 'Today we', 'Welcome back', or 'Have you ever'. "
+        "Include inline pacing cues like [PAUSE], [CUT TO B-ROLL], and [ZOOM IN] at natural edit points; "
+        "these are director notes for the editor embedded directly in the script text. "
+        "For long videos, section transitions must use retention phrases like 'But here is where it gets interesting' "
+        "or 'Now this is the part most people miss'. "
+        "No calls to action, subscribe reminders, or channel promotion anywhere in the output. "
         "Return only the JSON object. No markdown, no explanation."
     )
     user_prompt = (
@@ -263,9 +338,12 @@ def generate_script(idea: str, video_format: str, language: str = "english") -> 
         f"Format: {video_format}\n"
         f"Language: {language}\n"
         f"Rules: {length_rules}\n"
-        f"IMPORTANT: If the language is 'hindi', the 'video_script' MUST be written in Hindi (Devanagari script).\n\n"
-        "Return a JSON object with: video_script, on_screen_notes, "
-        "title_suggestions (array of 3-5 titles), estimated_duration, tone."
+        "Return all fields in one single JSON response.\n"
+        "Return exactly 5 title_suggestions.\n"
+        "If language is 'hindi', video_script MUST be in Hindi using Devanagari script, "
+        "but description, tags, and chapters MUST remain in English for SEO.\n\n"
+        "Return a JSON object with: video_script, on_screen_notes, title_suggestions, "
+        "description, tags, chapters, hook_type, estimated_duration, tone."
     )
     return _generate_json(system_prompt, user_prompt, SCRIPT_SCHEMA)
 
@@ -290,8 +368,10 @@ def generate_scenes(script_text: str, video_format: str, language: str = "englis
     system_prompt = (
         "You are a YouTube video director. "
         "Break scripts into concrete, searchable stock-video scenes. "
-        "visual_keyword must be a specific, visually searchable phrase (e.g. 'person typing laptop coffee shop'). "
-        "Never use abstract keywords (e.g. 'success', 'growth', 'innovation'). "
+        "visual_keyword must always be 3 to 6 words, concrete, and specific: subject plus action plus setting. "
+        "Never use abstract words in visual_keyword: success, growth, innovation, concept, idea, future, hope, journey, path, vision. "
+        "Adjacent scenes must have different keywords; no two consecutive scenes may use the same keyword or very similar keywords. "
+        "voiceover_text for each scene must map exactly to the corresponding portion of the approved script, word for word. "
         "Return only the JSON object. No markdown, no explanation."
     )
     user_prompt = (
@@ -348,3 +428,25 @@ def select_best_clips(scenes_data: list[dict]) -> list[dict]:
     user_prompt = f"Scenes and their clip candidates:\n{json.dumps(scenes_data, indent=2)}"
     result = _generate_json(system_prompt, user_prompt, CLIP_SELECTOR_SCHEMA)
     return result.get("selections", [])
+
+
+def score_clips_for_scene(scene_description: str, scene_keyword: str, clips: list[dict]) -> list[dict]:
+    """
+    Score candidate clips for a single scene by visual relevance.
+    Input clips contain {clip_id, name, source, duration}.
+    Output is sorted by score descending.
+    """
+    system_prompt = (
+        "You are an expert video editor scoring stock video candidates for visual relevance to a scene. "
+        "Score each clip from 0.0 to 1.0 based on how specifically it matches the scene description and keyword. "
+        "Favor concrete subject/action/setting matches over generic mood matches. "
+        "Return ONLY a JSON object with a scored_clips array."
+    )
+    user_prompt = (
+        f"Scene description:\n{scene_description}\n\n"
+        f"Scene visual keyword:\n{scene_keyword}\n\n"
+        f"Clip candidates:\n{json.dumps(clips, indent=2)}"
+    )
+    result = _generate_json(system_prompt, user_prompt, CLIP_SCORER_SCHEMA)
+    scored = result.get("scored_clips", [])
+    return sorted(scored, key=lambda item: float(item.get("score", 0.0)), reverse=True)

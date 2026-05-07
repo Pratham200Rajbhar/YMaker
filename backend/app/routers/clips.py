@@ -25,12 +25,30 @@ def fetch_clips(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
         raise HTTPException(status_code=409, detail="Approve scenes before fetching clips")
 
     try:
+        fetched_by_scene: dict[int, list[dict]] = {}
+        missing_scenes: list[int] = []
         for scene in project.scenes:
-            scene.clips.clear()
-            for item in fetch_clip_options(scene, project):
-                scene.clips.append(Clip(**item))
+            items = fetch_clip_options(scene, project)
+            if items:
+                fetched_by_scene[scene.id] = items
+            elif not scene.clips:
+                missing_scenes.append(scene.scene_index)
     except ClipServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if missing_scenes:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No clip options found for scenes: {', '.join(map(str, missing_scenes))}. Try improving the visual keywords.",
+        )
+
+    for scene in project.scenes:
+        items = fetched_by_scene.get(scene.id)
+        if not items:
+            continue
+        scene.clips.clear()
+        for item in items:
+            scene.clips.append(Clip(**item))
 
     project.current_stage = WorkflowStage.clips.value
     project.status = ProjectStatus.waiting_review.value

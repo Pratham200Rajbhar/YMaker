@@ -67,7 +67,13 @@ export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                {scene.clips.map((clip) => (
+                {scene.clips.map((clip) => {
+                  const sourceLabel = clip.source === "pixabay" ? "Pixabay" : "Pexels";
+                  const sourceBadgeClass =
+                    clip.source === "pixabay"
+                      ? "border-yellow-400/40 bg-yellow-400/90 text-zinc-950"
+                      : "border-emerald-500/40 bg-emerald-500/90 text-white";
+                  return (
                   <motion.button
                     key={clip.id}
                     whileHover={{ y: -4 }}
@@ -81,6 +87,9 @@ export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
                     }`}
                   >
                     <div className="aspect-video relative overflow-hidden bg-zinc-900">
+                      <span className={`absolute left-2 top-2 z-10 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider shadow-lg ${sourceBadgeClass}`}>
+                        {sourceLabel}
+                      </span>
                       {clip.image_url ? (
                         <Image
                           src={clip.image_url}
@@ -106,11 +115,17 @@ export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
                       <div className="space-y-0.5">
                         <div className="text-[10px] font-black text-white">{clip.width}×{clip.height}</div>
                         <div className="text-[9px] font-bold text-zinc-500">{clip.duration}s clip</div>
+                        {clip.ai_score !== null && clip.ai_score !== undefined && (
+                          <div className="text-[9px] font-bold text-forge-accent">
+                            AI Match: {Math.round(clip.ai_score * 100)}%
+                          </div>
+                        )}
                       </div>
                       <Badge tone={clip.selected ? "red" : "default"} className="text-[8px]">{clip.selected ? "Active" : "Select"}</Badge>
                     </div>
                   </motion.button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -7,14 +7,17 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { api } from "@/lib/api";
-import type { ProjectListItem, VideoFormat } from "@/lib/types";
+import type { ProjectListItem, VideoFormat, VideoLength } from "@/lib/types";
 import { Badge, Button, Panel, inputClass } from "@/components/ui";
 
 export default function HomePage() {
   const router = useRouter();
   const [idea, setIdea] = useState("");
   const [format, setFormat] = useState<VideoFormat>("shorts");
+  const [videoLength, setVideoLength] = useState<VideoLength>("auto");
   const [language, setLanguage] = useState("english");
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+  const [subtitleLanguage, setSubtitleLanguage] = useState("english");
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -27,7 +30,7 @@ export default function HomePage() {
     setBusy(true);
     setError("");
     try {
-      const project = await api.createProject(idea, format, language);
+      const project = await api.createProject(idea, format, videoLength, language, subtitlesEnabled, subtitleLanguage);
       router.push(`/projects/${project.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create project");
@@ -101,51 +104,91 @@ export default function HomePage() {
               <div className="mb-8">
                 <h2 className="text-3xl font-black tracking-tight text-white md:text-4xl">Forge a video from a rough idea</h2>
                 <p className="mt-3 max-w-2xl text-base leading-relaxed text-zinc-400">
-                  Our pipeline automates script, scenes, and rendering while keeping you in the director's chair.
+                  ScriptForge automates script, scenes, and rendering while keeping you in the director's chair.
                 </p>
               </div>
               
-              <div className="group relative">
-                <textarea
-                  className={`${inputClass} min-h-44 resize-y pr-12 transition-all duration-300 group-hover:border-forge-border/80`}
-                  placeholder="Example: A video explaining the psychology of why we procrastinate..."
-                  value={idea}
-                  onChange={(event) => setIdea(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900/50 text-zinc-400 backdrop-blur-sm transition-all hover:bg-forge-red hover:text-white disabled:opacity-50"
-                  title="Optimize idea with AI"
-                  disabled={busy || idea.trim().length < 5}
-                  onClick={optimizeIdea}
-                >
-                  <Wand2 className="h-4 w-4" />
-                </button>
+              <div className="group relative mb-8">
+                <div className="absolute -inset-0.5 rounded-2xl bg-gradient-to-r from-forge-red/20 to-forge-accent/20 opacity-0 blur transition duration-500 group-focus-within:opacity-100 group-hover:opacity-75" />
+                <div className="relative">
+                  <textarea
+                    className={`${inputClass} min-h-44 resize-y pr-14 transition-all duration-300 bg-black/40 backdrop-blur-xl border-white/5 group-hover:border-white/10`}
+                    placeholder="Describe your video idea in detail..."
+                    value={idea}
+                    onChange={(event) => setIdea(event.target.value)}
+                  />
+                  <div className="absolute right-3 top-3 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-zinc-400 backdrop-blur-md border border-white/10 transition-all hover:bg-forge-red hover:text-white hover:scale-110 disabled:opacity-50"
+                      title="Optimize idea with AI"
+                      disabled={busy || idea.trim().length < 5}
+                      onClick={optimizeIdea}
+                    >
+                      <Wand2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-8 flex flex-wrap items-end gap-6">
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Format</span>
-                  <div className="flex rounded-xl bg-forge-panel2/50 p-1.5 border border-forge-border/50">
-                    {["shorts", "long"].map((v) => (
+                  <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
+                    {[
+                      { id: "shorts", label: "Shorts", icon: "📱" },
+                      { id: "long", label: "Long Form", icon: "🎬" }
+                    ].map((v) => (
                       <button
-                        key={v}
-                        className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-200 ${format === v ? "bg-forge-red text-white shadow-lg shadow-forge-red/20" : "text-zinc-500 hover:text-zinc-300"}`}
-                        onClick={() => setFormat(v as VideoFormat)}
+                        key={v.id}
+                        className={`flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-300 ${format === v.id ? "bg-forge-red text-white shadow-lg shadow-forge-red/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                        onClick={() => setFormat(v.id as VideoFormat)}
                       >
-                        {v === "shorts" ? "Shorts" : "Long Form"}
+                        <span className="text-xs">{v.icon}</span>
+                        {v.label}
                       </button>
                     ))}
                   </div>
                 </div>
-                
+
+                <AnimatePresence mode="wait">
+                  {format === "long" && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -10 }}
+                      className="space-y-2"
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Video Length</span>
+                      <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
+                        {[
+                          { id: "auto", label: "Auto", desc: "AI Decides" },
+                          { id: "short", label: "Short", desc: "~2m" },
+                          { id: "medium", label: "Medium", desc: "~5m" },
+                          { id: "long", label: "Long", desc: "10m+" }
+                        ].map((v) => (
+                          <button
+                            key={v.id}
+                            className={`flex flex-col items-center rounded-lg px-4 py-2 text-sm font-bold transition-all duration-300 ${videoLength === v.id ? "bg-forge-accent text-white shadow-lg shadow-forge-accent/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                            onClick={() => setVideoLength(v.id as VideoLength)}
+                            title={v.desc}
+                          >
+                            {v.label}
+                            <span className="text-[8px] opacity-60 font-black uppercase tracking-tighter">{v.id === "auto" ? "✨" : v.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Language</span>
-                  <div className="flex rounded-xl bg-forge-panel2/50 p-1.5 border border-forge-border/50">
+                  <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
                     {["english", "hindi"].map((v) => (
                       <button
                         key={v}
-                        className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-200 ${language === v ? "bg-forge-red text-white shadow-lg shadow-forge-red/20" : "text-zinc-500 hover:text-zinc-300"}`}
+                        className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-300 ${language === v ? "bg-forge-red text-white shadow-lg shadow-forge-red/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
                         onClick={() => setLanguage(v)}
                       >
                         {v.charAt(0).toUpperCase() + v.slice(1)}
@@ -153,6 +196,46 @@ export default function HomePage() {
                     ))}
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Subtitles</span>
+                  <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
+                    <button
+                      className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-300 ${subtitlesEnabled ? "bg-forge-red text-white shadow-lg shadow-forge-red/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                      onClick={() => setSubtitlesEnabled(true)}
+                    >
+                      On
+                    </button>
+                    <button
+                      className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-300 ${!subtitlesEnabled ? "bg-forge-red text-white shadow-lg shadow-forge-red/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                      onClick={() => setSubtitlesEnabled(false)}
+                    >
+                      Off
+                    </button>
+                  </div>
+                </div>
+
+                {subtitlesEnabled && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="space-y-2"
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Subtitle Language</span>
+                    <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
+                      {["english", "hindi"].map((v) => (
+                        <button
+                          key={v}
+                          className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-300 ${subtitleLanguage === v ? "bg-forge-accent text-white shadow-lg shadow-forge-accent/30 scale-105" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                          onClick={() => setSubtitleLanguage(v)}
+                        >
+                          {v.charAt(0).toUpperCase() + v.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
 
                 <div className="ml-auto">
                   <Button 
@@ -214,6 +297,7 @@ export default function HomePage() {
                               <h3 className="line-clamp-1 text-lg font-bold text-white group-hover:text-forge-red transition-colors">{project.title}</h3>
                               <div className="flex flex-wrap gap-2">
                                 <Badge tone="red">{project.video_format === "shorts" ? "Shorts" : "Long Video"}</Badge>
+                                <Badge tone={project.video_length === "auto" ? "accent" : "default"}>{project.video_length}</Badge>
                                 <Badge tone="default" className="capitalize">{project.language}</Badge>
                                 <Badge tone="accent">{project.current_stage}</Badge>
                                 <Badge tone={project.status === "complete" ? "green" : "default"}>{project.status}</Badge>

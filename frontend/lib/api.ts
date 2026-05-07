@@ -1,4 +1,4 @@
-import type { Project, ProjectListItem, Script, Scene, VideoFormat } from "./types";
+import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -20,8 +20,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<ProjectListItem[]>("/projects"),
-  createProject: (idea: string, video_format: VideoFormat, language: string) =>
-    request<Project>("/projects", { method: "POST", body: JSON.stringify({ idea, video_format, language }) }),
+  createProject: (idea: string, video_format: VideoFormat, video_length: VideoLength, language: string, subtitles_enabled: boolean, subtitle_language: string) =>
+    request<Project>("/projects", { method: "POST", body: JSON.stringify({ idea, video_format, video_length, language, subtitles_enabled, subtitle_language }) }),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   optimizeIdea: (idea: string) =>

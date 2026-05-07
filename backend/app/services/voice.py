@@ -49,7 +49,8 @@ def generate_voiceover(project: Project, voice_name: str, db: Session) -> Render
     # Sort scenes by index
     scenes = sorted(project.scenes, key=lambda s: s.scene_index)
     
-    for scene in scenes:
+    voiced_scenes = [scene for scene in scenes if scene.voiceover_text.strip()]
+    for index, scene in enumerate(voiced_scenes):
         if not scene.voiceover_text.strip():
             logger.warning("Scene %d has no voiceover text, skipping", scene.scene_index)
             continue
@@ -65,6 +66,8 @@ def generate_voiceover(project: Project, voice_name: str, db: Session) -> Render
             )
             audio_data = np.frombuffer(response.audio, dtype=np.int16)
             all_audio_chunks.append(audio_data)
+            if index < len(voiced_scenes) - 1:
+                all_audio_chunks.append(np.zeros(int(sample_rate * 0.150), dtype=np.int16))
         except Exception as e:
             logger.error("Failed to generate TTS for scene %d: %s", scene.scene_index, str(e))
             raise VoiceServiceError(f"TTS generation failed for scene {scene.scene_index}: {e}") from e

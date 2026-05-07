@@ -82,8 +82,8 @@ export function ScriptStage({ project, busy, run, readOnly }: StageProps) {
                 <div className="rounded-xl border border-forge-border bg-forge-panel2/50 p-4">
                   <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-zinc-500">Suggested Titles</p>
                   <div className="flex flex-col gap-2">
-                    {draft.title_suggestions.map((title) => (
-                      <div key={title} className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-xs font-medium text-zinc-300">
+                    {draft.title_suggestions.map((title, idx) => (
+                      <div key={`${title}-${idx}`} className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2 text-xs font-medium text-zinc-300">
                         {title}
                       </div>
                     ))}

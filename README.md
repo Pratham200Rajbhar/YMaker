@@ -137,6 +137,12 @@ NVIDIA_API_KEY=your-nvidia-api-key
 # Pexels
 PEXELS_API_KEY=your-pexels-api-key
 
+# Pixabay
+PIXABAY_API_KEY=your-pixabay-api-key
+
+# Background music
+MUSIC_ENABLED=true
+
 # Frontend origin
 FRONTEND_ORIGIN=http://localhost:3000
 ```

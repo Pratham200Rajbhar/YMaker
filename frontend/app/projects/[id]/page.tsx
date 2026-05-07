@@ -101,10 +101,16 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 {project.video_format === "shorts" ? "9:16 Vertical" : "16:9 Landscape"}
               </Badge>
               <Badge tone="accent">{project.current_stage}</Badge>
+              <Badge tone={project.video_length === "auto" ? "red" : "default"} className="capitalize">
+                {project.video_length === "auto" ? "✨ Auto Length" : `Length: ${project.video_length}`}
+              </Badge>
               <Badge tone={project.status === "complete" ? "green" : "default"}>
                 {project.status}
               </Badge>
               <Badge className="bg-white/5 border-white/10">{project.language}</Badge>
+              <Badge tone={project.subtitles_enabled ? "accent" : "default"} className="bg-white/5 border-white/10">
+                {project.subtitles_enabled ? `Subtitles: ${project.subtitle_language}` : "No Subtitles"}
+              </Badge>
             </div>
           </motion.div>
           

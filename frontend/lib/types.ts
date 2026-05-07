@@ -1,4 +1,5 @@
 export type VideoFormat = "shorts" | "long";
+export type VideoLength = "auto" | "short" | "medium" | "long";
 export type WorkflowStage = "script" | "scenes" | "clips" | "voiceover" | "render";
 
 export type Script = {
@@ -7,6 +8,10 @@ export type Script = {
   video_script: string;
   on_screen_notes: string;
   title_suggestions: string[];
+  description: string | null;
+  tags: string[];
+  chapters: string[];
+  hook_type: string | null;
   estimated_duration: string;
   tone: string;
   approved: boolean;
@@ -14,7 +19,9 @@ export type Script = {
 
 export type Clip = {
   id: number;
-  pexels_id: string;
+  source_id: string;
+  source: string;
+  ai_score: number | null;
   url: string;
   preview_url: string | null;
   image_url: string | null;
@@ -43,6 +50,8 @@ export type Render = {
   voiceover_approved: boolean;
   subtitle_path: string | null;
   render_path: string | null;
+  music_path: string | null;
+  music_name: string | null;
   render_status: string;
   error_message: string | null;
 };
@@ -52,7 +61,11 @@ export type Project = {
   title: string;
   idea: string;
   video_format: VideoFormat;
+  video_length: VideoLength;
   language: string;
+  subtitles_enabled: boolean;
+  subtitle_language: string;
+  clip_provider: string;
   current_stage: WorkflowStage;
   status: string;
   error_message: string | null;
@@ -67,7 +80,11 @@ export type ProjectListItem = {
   id: number;
   title: string;
   video_format: VideoFormat;
+  video_length: VideoLength;
   language: string;
+  subtitles_enabled: boolean;
+  subtitle_language: string;
+  clip_provider: string;
   current_stage: WorkflowStage;
   status: string;
   created_at: string;

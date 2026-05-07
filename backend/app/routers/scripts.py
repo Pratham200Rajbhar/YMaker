@@ -5,7 +5,7 @@ from ..database import get_db
 from ..models import Project, ProjectStatus, Script, WorkflowStage
 from ..schemas import ProjectOut, ScriptUpdate
 from ..services.ai import AiServiceError, generate_script
-from ..utils import latest_script, project_out, titles_to_json
+from ..utils import latest_script, list_to_json, project_out, titles_to_json
 
 router = APIRouter(prefix="/projects/{project_id}/script", tags=["script"])
 
@@ -21,7 +21,7 @@ def _project(db: Session, project_id: int) -> Project:
 def create_script(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = _project(db, project_id)
     try:
-        data = generate_script(project.idea, project.video_format, project.language)
+        data = generate_script(project.idea, project.video_format, project.language, project.video_length)
     except AiServiceError as exc:
         raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}") from exc
 
@@ -32,6 +32,10 @@ def create_script(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
         video_script=data.get("video_script", ""),
         on_screen_notes=data.get("on_screen_notes", ""),
         title_suggestions=titles_to_json(data.get("title_suggestions", [])),
+        description=data.get("description"),
+        tags=list_to_json(data.get("tags", [])),
+        chapters=list_to_json(data.get("chapters", [])),
+        hook_type=data.get("hook_type"),
         estimated_duration=data.get("estimated_duration", ""),
         tone=data.get("tone", ""),
     )
@@ -52,7 +56,11 @@ def update_script(project_id: int, payload: ScriptUpdate, db: Session = Depends(
     if script.approved:
         raise HTTPException(status_code=409, detail="Approved script cannot be edited")
     for key, value in payload.model_dump().items():
-        setattr(script, key, titles_to_json(value) if key == "title_suggestions" else value)
+        if key == "title_suggestions":
+            value = titles_to_json(value)
+        elif key in {"tags", "chapters"}:
+            value = list_to_json(value)
+        setattr(script, key, value)
     db.commit()
     db.refresh(project)
     return project_out(project)

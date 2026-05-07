@@ -9,10 +9,15 @@ openai-whisper
 google-genai
 python-multipart
 Pillow
+numpy
 transformers
 torch
 torchaudio
 snac
 soundfile
+pyloudnorm
+nvidia-riva-client
+huggingface-hub
+python-dotenv
 accelerate
 bitsandbytes
