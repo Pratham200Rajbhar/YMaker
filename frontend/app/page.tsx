@@ -1,0 +1,249 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { ArrowRight, Clapperboard, Plus, Trash2, Wand2, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+
+import { api } from "@/lib/api";
+import type { ProjectListItem, VideoFormat } from "@/lib/types";
+import { Badge, Button, Panel, inputClass } from "@/components/ui";
+
+export default function HomePage() {
+  const router = useRouter();
+  const [idea, setIdea] = useState("");
+  const [format, setFormat] = useState<VideoFormat>("shorts");
+  const [language, setLanguage] = useState("english");
+  const [projects, setProjects] = useState<ProjectListItem[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch((err) => setError(err.message));
+  }, []);
+
+  async function createProject() {
+    setBusy(true);
+    setError("");
+    try {
+      const project = await api.createProject(idea, format, language);
+      router.push(`/projects/${project.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create project");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteProject(id: number) {
+    if (!confirm("Are you sure you want to delete this project?")) return;
+    try {
+      await api.deleteProject(id);
+      setProjects((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  async function optimizeIdea() {
+    if (idea.trim().length < 5) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { optimized_idea } = await api.optimizeIdea(idea);
+      setIdea(optimized_idea);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Optimization failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-forge-bg selection:bg-forge-red/30 selection:text-forge-red">
+      {/* Background Glow */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-forge-red/5 rounded-full blur-[120px]" />
+        <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] bg-forge-accent/5 rounded-full blur-[100px]" />
+      </div>
+
+      <div className="relative mx-auto max-w-6xl px-6 py-12 md:py-20">
+        <header className="mb-12 flex items-center justify-between">
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex items-center gap-4"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-forge-red to-forge-red2 text-white shadow-lg shadow-forge-red/20">
+              <Clapperboard className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-black tracking-tight text-white">ScriptForge</h1>
+              <p className="text-sm font-medium text-zinc-500">Human-reviewed AI video production</p>
+            </div>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <Badge tone="red" className="px-4 py-1.5 border-forge-red/20 bg-forge-red/5">Local-first Engine</Badge>
+          </motion.div>
+        </header>
+
+        <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Panel className="relative overflow-hidden">
+              <div className="mb-8">
+                <h2 className="text-3xl font-black tracking-tight text-white md:text-4xl">Forge a video from a rough idea</h2>
+                <p className="mt-3 max-w-2xl text-base leading-relaxed text-zinc-400">
+                  Our pipeline automates script, scenes, and rendering while keeping you in the director's chair.
+                </p>
+              </div>
+              
+              <div className="group relative">
+                <textarea
+                  className={`${inputClass} min-h-44 resize-y pr-12 transition-all duration-300 group-hover:border-forge-border/80`}
+                  placeholder="Example: A video explaining the psychology of why we procrastinate..."
+                  value={idea}
+                  onChange={(event) => setIdea(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900/50 text-zinc-400 backdrop-blur-sm transition-all hover:bg-forge-red hover:text-white disabled:opacity-50"
+                  title="Optimize idea with AI"
+                  disabled={busy || idea.trim().length < 5}
+                  onClick={optimizeIdea}
+                >
+                  <Wand2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-8 flex flex-wrap items-end gap-6">
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Format</span>
+                  <div className="flex rounded-xl bg-forge-panel2/50 p-1.5 border border-forge-border/50">
+                    {["shorts", "long"].map((v) => (
+                      <button
+                        key={v}
+                        className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-200 ${format === v ? "bg-forge-red text-white shadow-lg shadow-forge-red/20" : "text-zinc-500 hover:text-zinc-300"}`}
+                        onClick={() => setFormat(v as VideoFormat)}
+                      >
+                        {v === "shorts" ? "Shorts" : "Long Form"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Language</span>
+                  <div className="flex rounded-xl bg-forge-panel2/50 p-1.5 border border-forge-border/50">
+                    {["english", "hindi"].map((v) => (
+                      <button
+                        key={v}
+                        className={`rounded-lg px-6 py-2.5 text-sm font-bold transition-all duration-200 ${language === v ? "bg-forge-red text-white shadow-lg shadow-forge-red/20" : "text-zinc-500 hover:text-zinc-300"}`}
+                        onClick={() => setLanguage(v)}
+                      >
+                        {v.charAt(0).toUpperCase() + v.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ml-auto">
+                  <Button 
+                    className="w-full sm:w-auto bg-gradient-to-r from-forge-red to-forge-red2 text-white shadow-xl shadow-forge-red/20 hover:scale-[1.02]" 
+                    busy={busy} 
+                    disabled={idea.trim().length < 5} 
+                    onClick={createProject}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create Project
+                  </Button>
+                </div>
+              </div>
+              {error ? <p className="mt-4 text-sm font-medium text-forge-red animate-in">{error}</p> : null}
+            </Panel>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <Panel className="flex flex-col h-full">
+              <div className="mb-6 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-forge-red" />
+                  <h2 className="text-xl font-bold text-white">Recent Projects</h2>
+                </div>
+                <Badge tone="accent">{projects.length} Total</Badge>
+              </div>
+              
+              <div className="flex-1 space-y-4 overflow-y-auto pr-1 max-h-[500px] scrollbar-hide">
+                <AnimatePresence mode="popLayout">
+                  {projects.length === 0 ? (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex flex-col items-center justify-center rounded-xl border border-dashed border-forge-border/50 bg-white/[0.02] py-20 text-center"
+                    >
+                      <Clapperboard className="h-10 w-10 text-zinc-700 mb-3" />
+                      <p className="text-sm font-medium text-zinc-500">No projects found. Create your first video above.</p>
+                    </motion.div>
+                  ) : (
+                    projects.map((project, idx) => (
+                      <motion.div 
+                        key={project.id} 
+                        layout
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.05 }}
+                        className="group relative"
+                      >
+                        <Link 
+                          href={`/projects/${project.id}`} 
+                          className="block rounded-xl border border-forge-border bg-forge-panel2/30 p-5 transition-all duration-300 hover:border-forge-red/40 hover:bg-forge-panel2/60 pr-14"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-3">
+                              <h3 className="line-clamp-1 text-lg font-bold text-white group-hover:text-forge-red transition-colors">{project.title}</h3>
+                              <div className="flex flex-wrap gap-2">
+                                <Badge tone="red">{project.video_format === "shorts" ? "Shorts" : "Long Video"}</Badge>
+                                <Badge tone="default" className="capitalize">{project.language}</Badge>
+                                <Badge tone="accent">{project.current_stage}</Badge>
+                                <Badge tone={project.status === "complete" ? "green" : "default"}>{project.status}</Badge>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+                                {new Date(project.created_at).toLocaleDateString()} • {new Date(project.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                            <ArrowRight className="mt-1 h-5 w-5 text-zinc-700 transition-all group-hover:translate-x-1 group-hover:text-forge-red" />
+                          </div>
+                        </Link>
+                        <button
+                          className="absolute right-5 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-700 hover:bg-forge-red/10 hover:text-forge-red transition-all duration-200"
+                          title="Delete project"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            deleteProject(project.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </motion.div>
+                    ))
+                  )}
+                </AnimatePresence>
+              </div>
+            </Panel>
+          </motion.div>
+        </section>
+      </div>
+    </main>
+  );
+}

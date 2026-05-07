@@ -1,0 +1,53 @@
+## Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+site/
+*.egg-info/
+
+## Next.js / Node
+node_modules/
+.next/
+out/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## Environment / secrets
+.env
+.env.*
+!.env.example
+
+## AI project artifacts
+checkpoints/
+cache/
+data/
+artifacts/
+logs/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+## Local models
+backend/models_data/
+*.onnx

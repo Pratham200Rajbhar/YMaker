@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-forge-bg: #02040a;
+  --color-forge-panel: #0b0e14;
+  --color-forge-panel2: #141822;
+  --color-forge-border: #1f2430;
+  --color-forge-accent: #6366f1;
+  --color-forge-red: #f43f5e;
+  --color-forge-red2: #e11d48;
+  
+  --shadow-glow-red: 0 0 15px -3px rgba(244, 63, 94, 0.3);
+  --shadow-glow-accent: 0 0 15px -3px rgba(99, 102, 241, 0.3);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-forge-bg);
+    color: #f6f7fb;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #02040a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2430;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #272936;
+}
+
+.glass {
+  background: rgba(11, 14, 20, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.focus-ring {
+  @apply focus-visible:ring-2 focus-visible:ring-forge-red/50 focus-visible:ring-offset-2 focus-visible:ring-offset-forge-bg transition-all duration-200;
+}
+
+.animate-in {
+  animation: fade-in 0.5s ease-out;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
