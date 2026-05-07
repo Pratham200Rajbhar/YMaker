@@ -6,7 +6,7 @@ The project has a mix of intentional defaults and hidden fallback behavior. Some
 
 ## Goal
 
-Remove silent fallback/recovery paths and unused helper code while keeping required configuration defaults and explicit feature toggles. The app should fail loudly on real workflow errors, with clear messages and no hidden recovery.
+Remove silent fallback/recovery paths and unused helper code while keeping required configuration defaults and explicit feature toggles. The app should fail loudly on real workflow errors, with clear messages and no hidden recovery. The resulting code should be direct, readable, and free of unnecessary try/catch blocks, nested if/else chains, and duplicate branching.
 
 ## Approaches
 
@@ -34,6 +34,7 @@ Use the surgical cleanup approach.
 - Replace silent empty-result recovery with explicit service errors when a required provider cannot return usable data.
 - Keep deterministic processing helpers that are part of the core pipeline, such as media fit/trim logic, but do not let them hide real failures.
 - Replace broad exception swallowing with specific errors that bubble up to the router layer.
+- Keep try/catch blocks only where they add real value, such as translating a third-party failure into a domain error.
 
 ### Utility helpers
 
@@ -51,6 +52,7 @@ Use the surgical cleanup approach.
 - Remove polling/error branches that silently swallow refresh failures.
 - Trim redundant helper code in stage components where state can be handled directly.
 - Replace console-only failure handling in keyword optimization with visible UI errors.
+- Collapse unnecessary conditional branches where a direct expression is clearer.
 
 ## Non-goals
 
@@ -63,3 +65,4 @@ Use the surgical cleanup approach.
 - Run backend tests around clip search, voice generation, render execution, and malformed stored data.
 - Run frontend lint/build checks after the cleanup.
 - Confirm the app still creates projects, advances stages, and reports failures explicitly instead of silently recovering.
+- Confirm the cleaned code reads as standard, maintainable production code rather than a collection of defensive workarounds.
