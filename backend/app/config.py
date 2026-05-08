@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,7 +42,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Export FFMPEG_BINARY for MoviePy
-import os
 os.environ["FFMPEG_BINARY"] = settings.ffmpeg_binary
 
 

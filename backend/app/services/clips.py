@@ -155,10 +155,10 @@ def _fetch_pixabay_clips(keyword: str, project: Project, per_page: int = 6) -> l
         )
         response.raise_for_status()
     except requests.HTTPError as exc:
-        logger.warning("Pixabay API error (%s) for '%s'", exc.response.status_code, scene.visual_keyword)
+        logger.warning("Pixabay API error (%s) for '%s'", exc.response.status_code, keyword)
         return []
     except requests.RequestException as exc:
-        logger.warning("Pixabay connection failed for '%s': %s", scene.visual_keyword, exc)
+        logger.warning("Pixabay connection failed for '%s': %s", keyword, exc)
         return []
 
     items = []

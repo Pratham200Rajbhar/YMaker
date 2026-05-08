@@ -24,7 +24,7 @@ def fetch_clips(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     if not project.scenes or not all(scene.approved for scene in project.scenes):
         raise HTTPException(status_code=409, detail="Approve scenes before fetching clips")
 
-    scene_count = len(project.scenes)
+
     try:
         fetched_by_scene: dict[int, list[dict]] = {}
         missing_scenes: list[int] = []

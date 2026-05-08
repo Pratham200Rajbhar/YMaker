@@ -16,7 +16,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from ..config import settings
+
 from ..database import SessionLocal
 from ..models import Settings
 
@@ -208,7 +208,7 @@ def _extract_json(text: str | None) -> dict[str, Any]:
             # Simple cleanup for trailing commas in arrays/objects
             cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
             return json.loads(cleaned)
-        except:
+        except Exception:
             logger.error(f"Failed to parse JSON from: {text[:200]}...")
             return {}
 
@@ -328,7 +328,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
                 try:
                     error_data = response.json()
                     error_msg = error_data.get("error", {}).get("message", "Unknown error")
-                except:
+                except Exception:
                     error_msg = response.text
                 raise AiServiceError(f"{provider.capitalize()} API error: {error_msg}")
 
