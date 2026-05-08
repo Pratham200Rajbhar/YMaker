@@ -72,6 +72,10 @@ export const api = {
 
   startRender: (id: number) =>
     request<Project>(`/projects/${id}/render/start`, { method: "POST" }),
+
+  // Settings
+  getSettings: () => request<any>("/settings"),
+  updateSettings: (payload: any) => request<any>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
 };
 
 export function mediaUrl(path: string | null | undefined): string | null {

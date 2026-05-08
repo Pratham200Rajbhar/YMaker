@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, Clapperboard, Plus, Trash2, Wand2, Sparkles } from "lucide-react";
+import { ArrowRight, Clapperboard, Plus, Trash2, Wand2, Sparkles, Settings as SettingsIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { api } from "@/lib/api";
-import type { ProjectListItem, VideoFormat, VideoLength } from "@/lib/types";
+import type { ProjectListItem, VideoFormat, VideoLength, Settings } from "@/lib/types";
 import { Badge, Button, Panel, inputClass } from "@/components/ui";
 
 export default function HomePage() {
@@ -19,11 +19,13 @@ export default function HomePage() {
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleLanguage, setSubtitleLanguage] = useState("english");
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     api.listProjects().then(setProjects).catch((err) => setError(err.message));
+    api.getSettings().then(setSettings).catch((err) => console.error("Settings fetch failed", err));
   }, []);
 
   async function createProject() {
@@ -89,8 +91,21 @@ export default function HomePage() {
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
+            className="flex items-center gap-4"
           >
-            <Badge tone="red" className="px-4 py-1.5 border-forge-red/20 bg-forge-red/5">Local-first Engine</Badge>
+            <Link 
+              href="/settings"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-zinc-400 border border-white/10 transition-all hover:bg-white/10 hover:text-white"
+              title="System Settings"
+            >
+              <SettingsIcon className="h-5 w-5" />
+            </Link>
+            <Badge tone={settings?.llm_provider === "ollama" ? "red" : "accent"} className="px-4 py-1.5 border-white/10 bg-white/5">
+              {settings?.llm_provider === "ollama" ? "Local-first Engine" : 
+               settings?.llm_provider === "openai" ? "OpenAI Powered" :
+               settings?.llm_provider === "openrouter" ? "OpenRouter Engine" :
+               settings?.llm_provider === "vertex" ? "Gemini Pro AI" : "AI Engine"}
+            </Badge>
           </motion.div>
         </header>
 

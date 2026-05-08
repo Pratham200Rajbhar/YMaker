@@ -14,7 +14,11 @@ import re
 import time
 from typing import Any
 
+from sqlalchemy import select
+
 from ..config import settings
+from ..database import SessionLocal
+from ..models import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -176,8 +180,10 @@ CLIP_SCORER_SCHEMA = {
 # JSON extraction utility
 # ---------------------------------------------------------------------------
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _extract_json(text: str | None) -> dict[str, Any]:
     """Extract and parse the first JSON object found in text."""
+    if text is None:
+        return {}
     cleaned = text.strip()
     # Strip markdown code fences if model wrapped output
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
@@ -185,25 +191,26 @@ def _extract_json(text: str) -> dict[str, Any]:
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if match:
         cleaned = match.group(0)
-    return json.loads(cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {}
 
 
 # ---------------------------------------------------------------------------
 # Ollama backend — uses /api/chat for proper instruction-following
 # ---------------------------------------------------------------------------
 
-def _ollama_chat(messages: list[dict], schema: dict[str, Any]) -> dict[str, Any]:
+def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any]) -> dict[str, Any]:
     """
     Call Ollama /api/chat with structured JSON output.
-
-    Ollama 0.4+ accepts a JSON schema object in the `format` key for
-    structured output. Schema must be valid and model must support it.
     """
     import requests
 
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    base_url = ai_settings.get("ollama_base_url", "http://localhost:11434").rstrip("/")
+    url = f"{base_url}/api/chat"
     payload = {
-        "model": settings.ollama_model,
+        "model": ai_settings.get("ollama_model", "llama3"),
         "messages": messages,
         "format": schema,
         "stream": False,
@@ -227,23 +234,92 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# OpenAI backend (and compatible ones like OpenRouter)
+# ---------------------------------------------------------------------------
+
+def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any], provider: str = "openai") -> dict[str, Any]:
+    """
+    Call OpenAI-compatible chat API.
+    """
+    import requests
+
+    if provider == "openrouter":
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        api_key = ai_settings.get("openrouter_api_key")
+        model = ai_settings.get("openrouter_model", "anthropic/claude-3.5-sonnet")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://github.com/IdeaBuilder",
+            "X-Title": "IdeaBuilder",
+        }
+    else:
+        url = "https://api.openai.com/v1/chat/completions"
+        api_key = ai_settings.get("openai_api_key")
+        model = ai_settings.get("openai_model", "gpt-4o")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+        }
+
+    if not api_key:
+        raise AiServiceError(f"API key for {provider} is not configured in settings.")
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7,
+    }
+
+    # Only add response_format if it's likely supported (OpenAI or specific OpenRouter models)
+    # Or just try it and fallback if it errors
+    payload["response_format"] = {"type": "json_object"}
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=120)
+        
+        # If 400 error, it might be because response_format is not supported
+        if response.status_code == 400 and "response_format" in response.text:
+            logger.warning(f"{provider.capitalize()} doesn't support json_object mode, retrying without it.")
+            del payload["response_format"]
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+
+        if response.status_code != 200:
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("error", {}).get("message", "Unknown error")
+            except:
+                error_msg = response.text
+            raise AiServiceError(f"{provider.capitalize()} API error: {error_msg}")
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
+
+    try:
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        return _extract_json(content)
+    except (json.JSONDecodeError, IndexError, KeyError) as exc:
+        raise AiServiceError(f"{provider.capitalize()} returned malformed JSON: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Gemini (Vertex AI) backend
 # ---------------------------------------------------------------------------
 
-def _gemini_json(prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
-    if not settings.vertex_project_id:
-        raise AiServiceError("VERTEX_PROJECT_ID is not configured.")
+def _gemini_json(prompt: str, schema: dict[str, Any], ai_settings: dict[str, Any]) -> dict[str, Any]:
+    project_id = ai_settings.get("vertex_project_id")
+    if not project_id:
+        raise AiServiceError("Vertex Project ID is not configured in settings.")
     try:
         from google import genai
         from google.genai import types
 
         client = genai.Client(
             vertexai=True,
-            project=settings.vertex_project_id,
-            location=settings.vertex_location,
+            project=project_id,
+            location=ai_settings.get("vertex_location", "us-central1"),
         )
         response = client.models.generate_content(
-            model=settings.gemini_model,
+            model=ai_settings.get("gemini_model", "gemini-1.5-pro"),
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -257,6 +333,34 @@ def _gemini_json(prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Settings Loader
+# ---------------------------------------------------------------------------
+
+def _get_ai_settings() -> dict[str, Any]:
+    """Fetch current AI settings from the database."""
+    with SessionLocal() as db:
+        s = db.scalar(select(Settings))
+        if not s:
+            s = Settings()
+            db.add(s)
+            db.commit()
+            db.refresh(s)
+        
+        return {
+            "provider": s.llm_provider,
+            "ollama_base_url": s.ollama_base_url,
+            "ollama_model": s.ollama_model,
+            "openai_api_key": s.openai_api_key,
+            "openai_model": s.openai_model,
+            "openrouter_api_key": s.openrouter_api_key,
+            "openrouter_model": s.openrouter_model,
+            "vertex_project_id": s.vertex_project_id,
+            "vertex_location": s.vertex_location,
+            "gemini_model": s.gemini_model,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Unified dispatch
 # ---------------------------------------------------------------------------
 
@@ -266,15 +370,29 @@ def _generate_json(
     schema: dict[str, Any],
 ) -> dict[str, Any]:
     """Route to the configured model provider."""
-    if settings.model_provider.lower() == "ollama":
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        return _ollama_chat(messages, schema)
-    # Vertex AI — combine into a single prompt string
-    full_prompt = f"{system_prompt}\n\n{user_prompt}"
-    return _gemini_json(full_prompt, schema)
+    ai_settings = _get_ai_settings()
+    provider = ai_settings.get("provider", "ollama").lower()
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    if provider == "ollama":
+        return _ollama_chat(messages, schema, ai_settings)
+    
+    if provider == "openai":
+        return _openai_chat(messages, schema, ai_settings, provider="openai")
+    
+    if provider == "openrouter":
+        return _openai_chat(messages, schema, ai_settings, provider="openrouter")
+    
+    if provider == "vertex":
+        # Vertex AI — combine into a single prompt string
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+        return _gemini_json(full_prompt, schema, ai_settings)
+
+    raise AiServiceError(f"Unsupported AI provider: {provider}")
 
 
 # ---------------------------------------------------------------------------

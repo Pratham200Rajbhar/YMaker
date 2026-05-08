@@ -147,3 +147,31 @@ class KeywordOptimizeResponse(BaseModel):
 
 class VoiceGenerate(BaseModel):
     voice_name: str
+
+
+class SettingsOut(BaseModel):
+    id: int
+    llm_provider: str
+    ollama_base_url: str
+    ollama_model: str
+    openai_api_key: str | None = None
+    openai_model: str
+    openrouter_api_key: str | None = None
+    openrouter_model: str
+    vertex_project_id: str | None = None
+    vertex_location: str
+    gemini_model: str
+    updated_at: datetime
+
+
+class SettingsUpdate(BaseModel):
+    llm_provider: str | None = None
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
+    openai_api_key: str | None = None
+    openai_model: str | None = None
+    openrouter_api_key: str | None = None
+    openrouter_model: str | None = None
+    vertex_project_id: str | None = None
+    vertex_location: str | None = None
+    gemini_model: str | None = None

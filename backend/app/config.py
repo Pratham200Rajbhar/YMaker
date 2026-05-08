@@ -12,18 +12,6 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{BASE_DIR / 'scriptforge.db'}"
     frontend_origin: str = "http://localhost:3000"
 
-    # Model Provider: "vertex" or "ollama"
-    model_provider: str = "ollama"
-
-    # Vertex AI Config
-    vertex_project_id: str | None = None
-    vertex_location: str = "us-central1"
-    gemini_model: str
-
-    # Ollama Config
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str
-
     # Pexels
     pexels_api_key: str | None = None
 
@@ -46,6 +34,7 @@ class Settings(BaseSettings):
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         protected_namespaces=("settings_",),
+        extra="ignore",
     )
 
 

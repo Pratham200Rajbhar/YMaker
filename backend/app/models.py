@@ -128,3 +128,29 @@ class Render(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project: Mapped[Project] = relationship(back_populates="render")
+
+
+class Settings(Base):
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    llm_provider: Mapped[str] = mapped_column(String(50), default="ollama")
+
+    # Ollama
+    ollama_base_url: Mapped[str] = mapped_column(String(255), default="http://localhost:11434")
+    ollama_model: Mapped[str] = mapped_column(String(100), default="llama3")
+
+    # OpenAI
+    openai_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    openai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
+
+    # OpenRouter
+    openrouter_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    openrouter_model: Mapped[str] = mapped_column(String(100), default="anthropic/claude-3.5-sonnet")
+
+    # Vertex AI
+    vertex_project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vertex_location: Mapped[str] = mapped_column(String(100), default="us-central1")
+    gemini_model: Mapped[str] = mapped_column(String(100), default="gemini-1.5-pro")
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

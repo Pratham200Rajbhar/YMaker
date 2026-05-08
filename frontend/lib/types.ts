@@ -89,3 +89,18 @@ export type ProjectListItem = {
   status: string;
   created_at: string;
 };
+
+export type Settings = {
+  id: number;
+  llm_provider: string;
+  ollama_base_url: string;
+  ollama_model: string;
+  openai_api_key: string | null;
+  openai_model: string;
+  openrouter_api_key: string | null;
+  openrouter_model: string;
+  vertex_project_id: string | null;
+  vertex_location: string;
+  gemini_model: string;
+  updated_at: string;
+};
