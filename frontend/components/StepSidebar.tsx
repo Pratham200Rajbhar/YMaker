@@ -1,4 +1,4 @@
-import { Check, Circle, Lock } from "lucide-react";
+import { Check } from "lucide-react";
 import type { WorkflowStage } from "@/lib/types";
 import { motion } from "framer-motion";
 
@@ -40,7 +40,6 @@ export function StepSidebar({ active }: { active: WorkflowStage }) {
         {steps.map((step, index) => {
           const done = index < activeIndex;
           const current = index === activeIndex;
-          const future = index > activeIndex;
 
           return (
             <div

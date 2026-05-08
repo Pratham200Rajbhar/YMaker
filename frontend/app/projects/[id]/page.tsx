@@ -42,9 +42,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   }, [projectId]);
 
   useEffect(() => {
-    refresh().catch((err) => setError(err.message));
-    api.getSettings().then(s => setActiveProviderLabel(s.active_provider_label)).catch(console.error);
-  }, [refresh]);
+    let active = true;
+    async function load() {
+      try {
+        const data = await api.getProject(projectId);
+        if (active) setProject(data);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : "Unknown error");
+      }
+    }
+    load();
+    api.getSettings().then(s => {
+      if (active) setActiveProviderLabel(s.active_provider_label);
+    }).catch(console.error);
+    return () => { active = false; };
+  }, [projectId]);
 
   useEffect(() => {
     const status = project?.render?.render_status;
@@ -157,7 +169,6 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
           <div className="space-y-6">
             {STAGE_ORDER.map((stage, index) => {
               const isPast = index < activeIndex;
-              const isCurrent = index === activeIndex;
               const isFuture = index > activeIndex;
 
               if (isFuture) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Save, Wand2, Check } from "lucide-react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
@@ -8,7 +8,12 @@ import { StageProps, StageHeader, EmptyAction, ActionRow, updateSceneDraft } fro
 
 export function ScenesStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [drafts, setDrafts] = useState<Scene[]>(project.scenes);
-  useEffect(() => setDrafts(project.scenes), [project.scenes]);
+  const [prevScenes, setPrevScenes] = useState<Scene[]>(project.scenes);
+
+  if (project.scenes !== prevScenes) {
+    setPrevScenes(project.scenes);
+    setDrafts(project.scenes);
+  }
   const hasScenes = drafts.length > 0;
 
   if (readOnly && hasScenes) {

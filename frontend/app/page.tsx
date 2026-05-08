@@ -124,7 +124,7 @@ export default function HomePage() {
               <div className="mb-8">
                 <h2 className="text-3xl font-black tracking-tight text-white md:text-4xl">Forge a video from a rough idea</h2>
                 <p className="mt-3 max-w-2xl text-base leading-relaxed text-zinc-400">
-                  ScriptForge automates script, scenes, and rendering while keeping you in the director's chair.
+                  ScriptForge automates script, scenes, and rendering while keeping you in the director&apos;s chair.
                 </p>
               </div>
               

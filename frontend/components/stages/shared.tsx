@@ -1,9 +1,9 @@
 import { motion } from "framer-motion";
 import { Sparkles, Wand2 } from "lucide-react";
 import { Button, Badge } from "@/components/ui";
-import type { Project, ProjectListItem, Script, Scene } from "@/lib/types";
+import type { Project, Script, Scene } from "@/lib/types";
 
-export type RunFn = (label: string, action: () => Promise<Project>) => Promise<void>;
+export type RunFn = (_label: string, _action: () => Promise<Project>) => Promise<void>;
 
 export type StageProps = {
   project: Project;
@@ -75,13 +75,13 @@ export function MetaBox({ label, value }: { label: string; value: string | numbe
 }
 
 export function stripScript(script: Script) {
-  const { id: _id, version: _v, approved: _a, ...rest } = script;
+  const { id: _, version: __, approved: ___, ...rest } = script;
   return rest;
 }
 
 export function updateSceneDraft(
   drafts: Scene[],
-  setDrafts: (scenes: Scene[]) => void,
+  setDrafts: (_scenes: Scene[]) => void,
   index: number,
   patch: Partial<Scene>
 ) {

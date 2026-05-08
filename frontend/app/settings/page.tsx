@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Settings as SettingsIcon, ShieldCheck, Cpu, Globe, Server, AlertCircle, CheckCircle2, Eye, EyeOff, Activity } from "lucide-react";
+import { ArrowLeft, Settings as SettingsIcon, ShieldCheck, Cpu, Globe, Server, AlertCircle, CheckCircle2, Eye, EyeOff, Activity } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { api } from "@/lib/api";
@@ -78,75 +78,6 @@ export default function SettingsPage() {
     );
   }
 
-  const ProviderSection = ({ id, name, icon: Icon, children }: any) => {
-    const isActive = settings.llm_provider === id;
-    return (
-      <Panel className={`relative overflow-hidden border-white/10 transition-all duration-300 ${isActive ? "ring-2 ring-forge-red/50 bg-forge-red/[0.02]" : "bg-black/40"}`}>
-        <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
-          <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${isActive ? "bg-forge-red text-white" : "bg-white/5 text-zinc-500"}`}>
-              <Icon className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">{name}</h2>
-              <Badge tone={isActive ? "green" : "default"} className="mt-1">
-                {isActive ? "Active" : "Inactive"}
-              </Badge>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {!isActive && (
-              <Button 
-                className="bg-white/5 text-white hover:bg-white/10 px-3 py-1.5 text-xs min-h-8"
-                onClick={() => updateProvider(id)}
-                disabled={busy}
-              >
-                Set as Active
-              </Button>
-            )}
-            <Button 
-              className="border border-white/10 text-white hover:bg-white/5 px-3 py-1.5 text-xs min-h-8"
-              onClick={() => testConnection(id)}
-              busy={testing === id}
-              disabled={!isActive}
-              title={!isActive ? "Only the active provider can be tested" : ""}
-            >
-              <Activity className="h-4 w-4" />
-              Test Connection
-            </Button>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          {children}
-        </div>
-
-        {testResult && testResult.provider === id && (
-          <motion.div 
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            className={`mt-6 p-4 rounded-xl border ${testResult.success ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : "border-forge-red/20 bg-forge-red/5 text-forge-red"}`}
-          >
-            <div className="flex items-center gap-2 font-bold text-sm">
-              {testResult.success ? (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Connected Successfully
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="h-4 w-4" />
-                  Connection Failed
-                </>
-              )}
-            </div>
-            {testResult.error && <p className="mt-1 text-xs opacity-80 font-mono">{testResult.error}</p>}
-          </motion.div>
-        )}
-      </Panel>
-    );
-  };
-
   return (
     <main className="min-h-screen bg-forge-bg selection:bg-forge-red/30 selection:text-forge-red">
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -188,7 +119,17 @@ export default function SettingsPage() {
           )}
 
           {/* OLLAMA */}
-          <ProviderSection id="ollama" name="Ollama (Local)" icon={Server}>
+          <ProviderSection 
+            id="ollama" 
+            name="Ollama (Local)" 
+            icon={Server}
+            settings={settings}
+            updateProvider={updateProvider}
+            testConnection={testConnection}
+            busy={busy}
+            testing={testing}
+            testResult={testResult}
+          >
             <div className="grid gap-6 md:grid-cols-2">
               <Field label="Ollama Base URL">
                 <input
@@ -212,7 +153,17 @@ export default function SettingsPage() {
           </ProviderSection>
 
           {/* OPENAI */}
-          <ProviderSection id="openai" name="OpenAI" icon={Cpu}>
+          <ProviderSection 
+            id="openai" 
+            name="OpenAI" 
+            icon={Cpu}
+            settings={settings}
+            updateProvider={updateProvider}
+            testConnection={testConnection}
+            busy={busy}
+            testing={testing}
+            testResult={testResult}
+          >
             <div className="grid gap-6 md:grid-cols-2">
               <Field label="API Key">
                 <div className="relative">
@@ -245,7 +196,17 @@ export default function SettingsPage() {
           </ProviderSection>
 
           {/* OPENROUTER */}
-          <ProviderSection id="openrouter" name="OpenRouter" icon={Globe}>
+          <ProviderSection 
+            id="openrouter" 
+            name="OpenRouter" 
+            icon={Globe}
+            settings={settings}
+            updateProvider={updateProvider}
+            testConnection={testConnection}
+            busy={busy}
+            testing={testing}
+            testResult={testResult}
+          >
             <div className="grid gap-6 md:grid-cols-2">
               <Field label="API Key">
                 <div className="relative">
@@ -279,7 +240,17 @@ export default function SettingsPage() {
           </ProviderSection>
 
           {/* VERTEX */}
-          <ProviderSection id="vertex" name="Google Vertex AI" icon={ShieldCheck}>
+          <ProviderSection 
+            id="vertex" 
+            name="Google Vertex AI" 
+            icon={ShieldCheck}
+            settings={settings}
+            updateProvider={updateProvider}
+            testConnection={testConnection}
+            busy={busy}
+            testing={testing}
+            testResult={testResult}
+          >
             <div className="grid gap-6 md:grid-cols-3">
               <Field label="Project ID">
                 <input
@@ -313,5 +284,85 @@ export default function SettingsPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function ProviderSection({ icon: Icon, children, settings, updateProvider, testConnection, busy, testing, testResult, id, name }: {
+  id: string;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+  settings: Settings;
+  updateProvider: (_id: string) => void;
+  testConnection: (_id: string) => void;
+  busy: boolean;
+  testing: string;
+  testResult: { provider: string; success: boolean; error?: string } | null;
+}) {
+  const isActive = settings.llm_provider === id;
+  return (
+    <Panel className={`relative overflow-hidden border-white/10 transition-all duration-300 ${isActive ? "ring-2 ring-forge-red/50 bg-forge-red/[0.02]" : "bg-black/40"}`}>
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-lg ${isActive ? "bg-forge-red text-white" : "bg-white/5 text-zinc-500"}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white">{name}</h2>
+            <Badge tone={isActive ? "green" : "default"} className="mt-1">
+              {isActive ? "Active" : "Inactive"}
+            </Badge>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {!isActive && (
+            <Button 
+              className="bg-white/5 text-white hover:bg-white/10 px-3 py-1.5 text-xs min-h-8"
+              onClick={() => updateProvider(id)}
+              disabled={busy}
+            >
+              Set as Active
+            </Button>
+          )}
+          <Button 
+            className="border border-white/10 text-white hover:bg-white/5 px-3 py-1.5 text-xs min-h-8"
+            onClick={() => testConnection(id)}
+            busy={testing === id}
+            disabled={!isActive}
+            title={!isActive ? "Only the active provider can be tested" : ""}
+          >
+            <Activity className="h-4 w-4" />
+            Test Connection
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        {children}
+      </div>
+
+      {testResult && testResult.provider === id && (
+        <motion.div 
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className={`mt-6 p-4 rounded-xl border ${testResult.success ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : "border-forge-red/20 bg-forge-red/5 text-forge-red"}`}
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            {testResult.success ? (
+              <>
+                <CheckCircle2 className="h-4 w-4" />
+                Connected Successfully
+              </>
+            ) : (
+              <>
+                <AlertCircle className="h-4 w-4" />
+                Connection Failed
+              </>
+            )}
+          </div>
+          {testResult.error && <p className="mt-1 text-xs opacity-80 font-mono">{testResult.error}</p>}
+        </motion.div>
+      )}
+    </Panel>
   );
 }

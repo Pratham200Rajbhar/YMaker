@@ -1,4 +1,4 @@
-import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength } from "./types";
+import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength, Settings } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -75,8 +75,8 @@ export const api = {
     request<Project>(`/projects/${id}/render/start`, { method: "POST" }),
 
   // Settings
-  getSettings: () => request<any>("/settings"),
-  updateSettings: (payload: any) => request<any>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
+  getSettings: () => request<Settings>("/settings"),
+  updateSettings: (payload: Partial<Settings>) => request<Settings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
   testLLMConnection: () => request<{ provider: string, success: boolean, error: string | null }>("/settings/test", { method: "POST" }),
 };
 

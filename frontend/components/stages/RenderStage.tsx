@@ -2,7 +2,7 @@ import { Wand2, Download, Play, CheckCircle2, AlertCircle, Loader2 } from "lucid
 import { motion, AnimatePresence } from "framer-motion";
 import { api, API_BASE, mediaUrl } from "@/lib/api";
 import { Button } from "@/components/ui";
-import { StageProps, StageHeader, ActionRow } from "./shared";
+import { StageProps, StageHeader } from "./shared";
 
 export function RenderStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const video = mediaUrl(project.render?.render_path);

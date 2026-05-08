@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Save, Wand2, Check, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Save, Check, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Field, inputClass } from "@/components/ui";
 import type { Script } from "@/lib/types";
@@ -7,7 +7,12 @@ import { StageProps, StageHeader, MetaBox, EmptyAction, ActionRow, stripScript }
 
 export function ScriptStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [draft, setDraft] = useState<Script | null>(project.latest_script);
-  useEffect(() => setDraft(project.latest_script), [project.latest_script]);
+  const [prevScript, setPrevScript] = useState<Script | null>(project.latest_script);
+
+  if (project.latest_script !== prevScript) {
+    setPrevScript(project.latest_script);
+    setDraft(project.latest_script);
+  }
 
   const canEdit = !readOnly && draft && !draft.approved;
 
