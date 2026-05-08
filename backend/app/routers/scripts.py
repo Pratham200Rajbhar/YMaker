@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Project, ProjectStatus, Script, WorkflowStage
 from ..schemas import ProjectOut, ScriptUpdate
-from ..services.ai import AiServiceError, generate_script, _get_ai_settings
+from ..services.ai import AiServiceError, generate_script
 from ..utils import latest_script, list_to_json, project_out, titles_to_json
 
 router = APIRouter(prefix="/projects/{project_id}/script", tags=["script"])
