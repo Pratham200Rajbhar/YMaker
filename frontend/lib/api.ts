@@ -20,8 +20,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<ProjectListItem[]>("/projects"),
-  createProject: (idea: string, video_format: VideoFormat, video_length: VideoLength, language: string, subtitles_enabled: boolean, subtitle_language: string) =>
-    request<Project>("/projects", { method: "POST", body: JSON.stringify({ idea, video_format, video_length, language, subtitles_enabled, subtitle_language }) }),
+  listCategories: () => request<string[]>("/categories"),
+  createProject: (idea: string, category: string, video_format: VideoFormat, video_length: VideoLength, language: string, subtitles_enabled: boolean, subtitle_language: string) =>
+    request<Project>("/projects", { method: "POST", body: JSON.stringify({ idea, category, video_format, video_length, language, subtitles_enabled, subtitle_language }) }),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   optimizeIdea: (idea: string) =>
@@ -76,6 +77,7 @@ export const api = {
   // Settings
   getSettings: () => request<any>("/settings"),
   updateSettings: (payload: any) => request<any>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
+  testLLMConnection: () => request<{ provider: string, success: boolean, error: string | null }>("/settings/test", { method: "POST" }),
 };
 
 export function mediaUrl(path: string | null | undefined): string | null {

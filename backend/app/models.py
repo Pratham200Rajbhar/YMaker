@@ -35,6 +35,7 @@ class Project(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(220), default="Untitled Project")
     idea: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(60), default="General")
     video_format: Mapped[str] = mapped_column(String(20))
     video_length: Mapped[str] = mapped_column(String(20), default="auto")
     language: Mapped[str] = mapped_column(String(20), default="english")

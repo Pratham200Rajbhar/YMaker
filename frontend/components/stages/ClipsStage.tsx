@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { Button, Badge } from "@/components/ui";
 import { StageProps, StageHeader, EmptyAction, ActionRow } from "./shared";
 
-export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
+export function ClipsStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const hasClips = project.scenes.some((scene) => scene.clips.length > 0);
 
   if (readOnly) {
@@ -13,13 +13,20 @@ export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
       s.clips.some((c) => c.selected)
     ).length;
     return (
-      <div className="flex items-center gap-4">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-          <Sparkles className="h-6 w-6 text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-sm font-bold text-zinc-200">Media Assets Selected</p>
-          <p className="text-xs text-zinc-500">{selectedCount} of {project.scenes.length} scenes have verified clips.</p>
+      <div className="space-y-6">
+        <StageHeader
+          title="Media Selection"
+          detail="Choose the perfect stock clip for each scene. Use AI to auto-select based on relevance."
+          providerLabel={providerLabel}
+        />
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <Sparkles className="h-6 w-6 text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-zinc-200">Media Assets Selected</p>
+            <p className="text-xs text-zinc-500">{selectedCount} of {project.scenes.length} scenes have verified clips.</p>
+          </div>
         </div>
       </div>
     );
@@ -30,6 +37,7 @@ export function ClipsStage({ project, busy, run, readOnly }: StageProps) {
       <StageHeader
         title="Media Selection"
         detail="Choose the perfect stock clip for each scene. Use AI to auto-select based on relevance."
+        providerLabel={providerLabel}
       />
       
       {!hasClips ? (

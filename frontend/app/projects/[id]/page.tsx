@@ -31,6 +31,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
   const { id } = use(params);
   const projectId = Number(id);
   const [project, setProject] = useState<Project | null>(null);
+  const [activeProviderLabel, setActiveProviderLabel] = useState<string>("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -42,6 +43,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
   useEffect(() => {
     refresh().catch((err) => setError(err.message));
+    api.getSettings().then(s => setActiveProviderLabel(s.active_provider_label)).catch(console.error);
   }, [refresh]);
 
   useEffect(() => {
@@ -146,8 +148,10 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
+            className="space-y-6"
           >
             <StepSidebar active={project.current_stage as WorkflowStage} />
+            
           </motion.div>
 
           <div className="space-y-6">
@@ -199,7 +203,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                           exit={{ opacity: 0, height: 0 }}
                           className="border-t border-forge-border px-6 py-6 bg-forge-bg/30"
                         >
-                          {renderStageContent(stage, project, busy, run, true)}
+                          {renderStageContent(stage, project, busy, run, true, activeProviderLabel)}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -215,7 +219,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                   transition={{ delay: 0.2 }}
                 >
                   <Panel className="border-forge-red/20 shadow-glow-red/5">
-                    {renderStageContent(stage, project, busy, run, false)}
+                    {renderStageContent(stage, project, busy, run, false, activeProviderLabel)}
                   </Panel>
                 </motion.div>
               );
@@ -232,9 +236,10 @@ function renderStageContent(
   project: Project,
   busy: string,
   run: RunFn,
-  readOnly: boolean
+  readOnly: boolean,
+  providerLabel?: string
 ) {
-  const props = { project, busy, run, readOnly };
+  const props = { project, busy, run, readOnly, providerLabel };
   switch (stage) {
     case "script": return <ScriptStage {...props} />;
     case "scenes": return <ScenesStage {...props} />;

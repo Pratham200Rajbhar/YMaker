@@ -48,3 +48,16 @@ def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    
+    # Simple migration for new columns
+    if settings.database_url.startswith("sqlite"):
+        with engine.connect() as conn:
+            # Check for category column
+            res = conn.execute(text("PRAGMA table_info(projects)"))
+            columns = [row[1] for row in res.fetchall()]
+            if "category" not in columns:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN category TEXT NOT NULL DEFAULT 'General'"))
+                conn.commit()
+            if "video_length" not in columns:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN video_length TEXT NOT NULL DEFAULT 'auto'"))
+                conn.commit()

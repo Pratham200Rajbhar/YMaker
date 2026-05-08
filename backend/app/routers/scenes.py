@@ -29,8 +29,10 @@ def create_scenes(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
 
     try:
         scene_items = generate_scenes(script_text, project.video_format, project.language)
-    except AiServiceError as exc:
-        raise HTTPException(status_code=502, detail=f"Scene generation failed: {exc}") from exc
+    except Exception as exc:
+        if isinstance(exc, AiServiceError):
+            raise HTTPException(status_code=502, detail=f"Scene generation failed: {exc}") from exc
+        raise exc
 
     project.scenes.clear()
     for item in scene_items:

@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import STORAGE_DIR, ensure_storage_dirs, settings
 from .database import init_db
-from .routers import ai, clips, projects, render, scenes, scripts, voice, settings as settings_router
+from .routers import ai, clips, projects, render, scenes, scripts, voice, settings as settings_router, categories
 
 
 def create_app() -> FastAPI:
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(voice.router)
     app.include_router(render.router)
     app.include_router(settings_router.router)
+    app.include_router(categories.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -6,7 +6,7 @@ import { Button, Field, Badge, inputClass } from "@/components/ui";
 import type { Scene } from "@/lib/types";
 import { StageProps, StageHeader, EmptyAction, ActionRow, updateSceneDraft } from "./shared";
 
-export function ScenesStage({ project, busy, run, readOnly }: StageProps) {
+export function ScenesStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [drafts, setDrafts] = useState<Scene[]>(project.scenes);
   useEffect(() => setDrafts(project.scenes), [project.scenes]);
   const hasScenes = drafts.length > 0;
@@ -14,6 +14,11 @@ export function ScenesStage({ project, busy, run, readOnly }: StageProps) {
   if (readOnly && hasScenes) {
     return (
       <div className="space-y-3">
+        <StageHeader
+          title="Visual Breakdown"
+          detail="We've broken your script into logical scenes. Adjust the keywords to influence stock media search."
+          providerLabel={providerLabel}
+        />
         {drafts.map((scene) => (
           <div key={scene.id} className="flex items-center gap-4 rounded-xl border border-forge-border bg-forge-bg/50 px-4 py-3">
             <div className="flex h-8 w-16 shrink-0 items-center justify-center rounded-lg bg-forge-panel border border-forge-border text-[10px] font-black text-zinc-500 uppercase">
@@ -32,6 +37,7 @@ export function ScenesStage({ project, busy, run, readOnly }: StageProps) {
       <StageHeader
         title="Visual Breakdown"
         detail="We've broken your script into logical scenes. Adjust the keywords to influence stock media search."
+        providerLabel={providerLabel}
       />
       {!hasScenes ? (
         <EmptyAction

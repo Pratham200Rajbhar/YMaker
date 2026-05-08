@@ -10,6 +10,7 @@ VideoLength = Literal["auto", "short", "medium", "long"]
 
 class ProjectCreate(BaseModel):
     idea: str = Field(min_length=5)
+    category: str = "General"
     video_format: VideoFormat
     video_length: VideoLength = "auto"
     language: str = "english"
@@ -94,12 +95,15 @@ class RenderOut(BaseModel):
     error_message: str | None
 
 
+
+
 class ProjectOut(BaseModel):
     id: int
     title: str
     idea: str
+    category: str = "General"
     video_format: str
-    video_length: str
+    video_length: str = "auto"
     language: str
     subtitles_enabled: bool
     subtitle_language: str
@@ -117,8 +121,9 @@ class ProjectOut(BaseModel):
 class ProjectListItem(BaseModel):
     id: int
     title: str
+    category: str = "General"
     video_format: str
-    video_length: str
+    video_length: str = "auto"
     language: str
     subtitles_enabled: bool
     subtitle_language: str
@@ -162,6 +167,10 @@ class SettingsOut(BaseModel):
     vertex_location: str
     gemini_model: str
     updated_at: datetime
+
+
+class SettingsWithLabel(SettingsOut):
+    active_provider_label: str
 
 
 class SettingsUpdate(BaseModel):

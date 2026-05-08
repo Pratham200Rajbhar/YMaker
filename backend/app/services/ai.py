@@ -184,17 +184,33 @@ def _extract_json(text: str | None) -> dict[str, Any]:
     """Extract and parse the first JSON object found in text."""
     if text is None:
         return {}
+    
+    # Remove thinking tags if present (common in OpenRouter reasoning models)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    
     cleaned = text.strip()
     # Strip markdown code fences if model wrapped output
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
-        cleaned = match.group(0)
+    
+    # Find the first { and the last }
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        return {}
+        # One last attempt: try to fix common trailing comma issue or small errors
+        try:
+            # Simple cleanup for trailing commas in arrays/objects
+            cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+            return json.loads(cleaned)
+        except:
+            logger.error(f"Failed to parse JSON from: {text[:200]}...")
+            return {}
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +243,12 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
     try:
         data = response.json()
-        content = data.get("message", {}).get("content", "{}")
+        message = data.get("message", {})
+        content = message.get("content")
+        if not content:
+            # Handle cases where model might have failed or returned empty
+            logger.error(f"Ollama returned empty content. Full response: {data}")
+            return {}
         return _extract_json(content)
     except json.JSONDecodeError as exc:
         raise AiServiceError(f"Ollama returned malformed JSON: {exc}") from exc
@@ -239,7 +260,7 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
 def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any], provider: str = "openai") -> dict[str, Any]:
     """
-    Call OpenAI-compatible chat API.
+    Call OpenAI-compatible chat API with robust retries and JSON mode fallback.
     """
     import requests
 
@@ -251,6 +272,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
             "Authorization": f"Bearer {api_key}",
             "HTTP-Referer": "https://github.com/IdeaBuilder",
             "X-Title": "IdeaBuilder",
+            "Content-Type": "application/json",
         }
     else:
         url = "https://api.openai.com/v1/chat/completions"
@@ -258,6 +280,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         model = ai_settings.get("openai_model", "gpt-4o")
         headers = {
             "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
         }
 
     if not api_key:
@@ -269,36 +292,70 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         "temperature": 0.7,
     }
 
-    # Only add response_format if it's likely supported (OpenAI or specific OpenRouter models)
-    # Or just try it and fallback if it errors
+    if provider == "openrouter":
+        payload["reasoning"] = {"enabled": False}
+
+    # Start with JSON mode enabled
     payload["response_format"] = {"type": "json_object"}
 
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=120)
-        
-        # If 400 error, it might be because response_format is not supported
-        if response.status_code == 400 and "response_format" in response.text:
-            logger.warning(f"{provider.capitalize()} doesn't support json_object mode, retrying without it.")
-            del payload["response_format"]
-            response = requests.post(url, json=payload, headers=headers, timeout=120)
+    max_retries = 3
+    retry_delay = 2
+    timeout = 300  # Increased to 5 minutes for "too much step" tasks
 
-        if response.status_code != 200:
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error", {}).get("message", "Unknown error")
-            except:
-                error_msg = response.text
-            raise AiServiceError(f"{provider.capitalize()} API error: {error_msg}")
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"AI Attempt {attempt + 1}/{max_retries} for {provider} ({model})")
+            response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            
+            # 1. Handle JSON mode support issues (400/422)
+            if response.status_code in (400, 422) and "response_format" in payload:
+                error_text = response.text.lower()
+                if "response_format" in error_text or "json_object" in error_text or "unsupported" in error_text:
+                    logger.warning(f"{provider.capitalize()} doesn't support json_object mode, falling back.")
+                    del payload["response_format"]
+                    continue  # Retry immediately without JSON mode
 
-    try:
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-        return _extract_json(content)
-    except (json.JSONDecodeError, IndexError, KeyError) as exc:
-        raise AiServiceError(f"{provider.capitalize()} returned malformed JSON: {exc}") from exc
+            # 2. Handle transient errors (5xx) or OpenRouter provider errors
+            if response.status_code >= 500 or (response.status_code == 400 and "Provider returned error" in response.text):
+                if attempt < max_retries - 1:
+                    logger.warning(f"Transient error ({response.status_code}), retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+            
+            # 3. Raise for other status codes
+            if response.status_code != 200:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", "Unknown error")
+                except:
+                    error_msg = response.text
+                raise AiServiceError(f"{provider.capitalize()} API error: {error_msg}")
+
+            # 4. Successful response
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            if not content or content == "{}":
+                 if attempt < max_retries - 1:
+                    logger.warning("Empty content from AI, retrying...")
+                    continue
+            
+            result = _extract_json(content)
+            if not result and attempt < max_retries - 1:
+                logger.warning(f"Failed to extract JSON from {provider} response, retrying...")
+                continue
+                
+            return result
+
+        except requests.RequestException as exc:
+            if attempt < max_retries - 1:
+                logger.warning(f"Connection error: {exc}, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
+
+    raise AiServiceError(f"{provider.capitalize()} failed after {max_retries} attempts.")
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +429,18 @@ def _generate_json(
     """Route to the configured model provider."""
     ai_settings = _get_ai_settings()
     provider = ai_settings.get("provider", "ollama").lower()
+
+    if provider != "ollama":
+        # For non-Ollama providers, we must reinforce the JSON schema in the system prompt
+        # since we don't pass the schema object natively in the same way.
+        schema_text = json.dumps(schema, indent=2)
+        instruction = (
+            f"\n\nCRITICAL: You MUST return a valid JSON object. "
+            f"Do not include any thinking tags, markdown code blocks, or preamble. "
+            f"The response must be a single JSON object matching this schema:\n{schema_text}"
+        )
+        # Append to the system prompt
+        system_prompt += instruction
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -508,10 +577,12 @@ def generate_scenes(script_text: str, video_format: str, language: str = "englis
 def optimize_idea(idea: str) -> str:
     """Expand a rough idea into a detailed premise."""
     system_prompt = (
-        "You are an expert YouTube content strategist. "
-        "Expand the user's rough idea into a detailed, compelling premise. "
-        "Add specific details, narrative angles, or structural hints that will help produce a better script. "
-        "Keep it to 2-3 paragraphs. No calls to action."
+        "You are an elite YouTube Content Strategist. Your task is to transform a raw, basic idea into a "
+        "comprehensive, high-quality production premise that serves as a perfect blueprint for a scriptwriter. "
+        "Expand the idea by adding: 1) A unique high-retention narrative angle, 2) Specific technical details or "
+        "concrete examples, and 3) A clear structural framing. "
+        "The output must be pure content—dense, professional, and ready for production. "
+        "Do NOT include conversational filler, introductory phrases (like 'Here is...'), or meta-commentary."
     )
     user_prompt = f"Optimize this rough idea:\n{idea}"
     result = _generate_json(system_prompt, user_prompt, IDEA_OPTIMIZER_SCHEMA)
@@ -521,10 +592,11 @@ def optimize_idea(idea: str) -> str:
 def optimize_visual_keyword(description: str, current_keyword: str) -> str:
     """Refine a scene keyword for better stock video search results."""
     system_prompt = (
-        "You are a stock video search expert. "
-        "Take a scene description and a draft keyword, and return a more effective, concrete search query. "
-        "The keyword should be specific, visual, and likely to return high-quality results on Pexels. "
-        "Avoid abstract concepts. Focus on subjects, actions, and settings."
+        "You are a master stock video curator. Transform a scene description into a high-converting Pexels search query. "
+        "The keyword MUST be concrete, visual, and specific. Use a 'Subject + Action + Environment' formula. "
+        "Avoid ALL abstract terms: growth, success, concept, idea, connection, future, innovation, happiness. "
+        "Focus on tangible elements that search engines can actually index. "
+        "Return ONLY the optimized keyword string."
     )
     user_prompt = f"Scene Description: {description}\nCurrent Keyword: {current_keyword}\n\nOptimize the keyword for a stock video search."
     result = _generate_json(system_prompt, user_prompt, KEYWORD_OPTIMIZER_SCHEMA)

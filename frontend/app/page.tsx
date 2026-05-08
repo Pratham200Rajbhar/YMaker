@@ -10,21 +10,26 @@ import { api } from "@/lib/api";
 import type { ProjectListItem, VideoFormat, VideoLength, Settings } from "@/lib/types";
 import { Badge, Button, Panel, inputClass } from "@/components/ui";
 
+
 export default function HomePage() {
   const router = useRouter();
   const [idea, setIdea] = useState("");
+  const [category, setCategory] = useState("General");
+  const [categories, setCategories] = useState<string[]>([]);
   const [format, setFormat] = useState<VideoFormat>("shorts");
   const [videoLength, setVideoLength] = useState<VideoLength>("auto");
   const [language, setLanguage] = useState("english");
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [subtitleLanguage, setSubtitleLanguage] = useState("english");
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState("All");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     api.listProjects().then(setProjects).catch((err) => setError(err.message));
+    api.listCategories().then(setCategories).catch((err) => console.error("Categories fetch failed", err));
     api.getSettings().then(setSettings).catch((err) => console.error("Settings fetch failed", err));
   }, []);
 
@@ -32,7 +37,7 @@ export default function HomePage() {
     setBusy(true);
     setError("");
     try {
-      const project = await api.createProject(idea, format, videoLength, language, subtitlesEnabled, subtitleLanguage);
+      const project = await api.createProject(idea, category, format, videoLength, language, subtitlesEnabled, subtitleLanguage);
       router.push(`/projects/${project.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create project");
@@ -147,6 +152,23 @@ export default function HomePage() {
               </div>
 
               <div className="mt-8 flex flex-wrap items-end gap-6">
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Category</span>
+                  <div className="relative">
+                    <select
+                      className={`${inputClass} !py-2.5 !px-4 !h-[46px] min-w-[160px] bg-white/[0.03] border-white/5 backdrop-blur-md font-bold text-sm`}
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                    >
+                      {categories.map((cat) => (
+                        <option key={cat} value={cat} className="bg-zinc-900">
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 ml-1">Format</span>
                   <div className="flex rounded-xl bg-white/[0.03] p-1.5 border border-white/5 backdrop-blur-md">
@@ -281,6 +303,20 @@ export default function HomePage() {
                 </div>
                 <Badge tone="accent">{projects.length} Total</Badge>
               </div>
+
+              {projects.length > 0 && (
+                <div className="mb-6 flex flex-wrap gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                  {["All", ...Array.from(new Set(projects.map(p => p.category)))].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategoryFilter(cat)}
+                      className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${activeCategoryFilter === cat ? "bg-forge-red text-white" : "bg-white/5 text-zinc-500 hover:bg-white/10"}`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
               
               <div className="flex-1 space-y-4 overflow-y-auto pr-1 max-h-[500px] scrollbar-hide">
                 <AnimatePresence mode="popLayout">
@@ -294,7 +330,9 @@ export default function HomePage() {
                       <p className="text-sm font-medium text-zinc-500">No projects found. Create your first video above.</p>
                     </motion.div>
                   ) : (
-                    projects.map((project, idx) => (
+                    projects
+                      .filter(p => activeCategoryFilter === "All" || p.category === activeCategoryFilter)
+                      .map((project, idx) => (
                       <motion.div 
                         key={project.id} 
                         layout
@@ -311,6 +349,7 @@ export default function HomePage() {
                             <div className="space-y-3">
                               <h3 className="line-clamp-1 text-lg font-bold text-white group-hover:text-forge-red transition-colors">{project.title}</h3>
                               <div className="flex flex-wrap gap-2">
+                                <Badge tone="accent" className="bg-forge-accent/20 border-forge-accent/30 text-forge-accent">{project.category}</Badge>
                                 <Badge tone="red">{project.video_format === "shorts" ? "Shorts" : "Long Video"}</Badge>
                                 <Badge tone={project.video_length === "auto" ? "accent" : "default"}>{project.video_length}</Badge>
                                 <Badge tone="default" className="capitalize">{project.language}</Badge>

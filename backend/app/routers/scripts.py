@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Project, ProjectStatus, Script, WorkflowStage
 from ..schemas import ProjectOut, ScriptUpdate
-from ..services.ai import AiServiceError, generate_script
+from ..services.ai import AiServiceError, generate_script, _get_ai_settings
 from ..utils import latest_script, list_to_json, project_out, titles_to_json
 
 router = APIRouter(prefix="/projects/{project_id}/script", tags=["script"])
@@ -20,10 +20,14 @@ def _project(db: Session, project_id: int) -> Project:
 @router.post("/generate", response_model=ProjectOut)
 def create_script(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = _project(db, project_id)
+    ai_settings = _get_ai_settings()
+    provider = ai_settings.get("provider", "ollama")
     try:
         data = generate_script(project.idea, project.video_format, project.language, project.video_length)
-    except AiServiceError as exc:
-        raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}") from exc
+    except Exception as exc:
+        if isinstance(exc, AiServiceError):
+            raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}") from exc
+        raise exc
 
     current = latest_script(project)
     script = Script(

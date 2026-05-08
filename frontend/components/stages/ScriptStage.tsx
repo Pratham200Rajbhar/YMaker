@@ -5,7 +5,7 @@ import { Button, Field, inputClass } from "@/components/ui";
 import type { Script } from "@/lib/types";
 import { StageProps, StageHeader, MetaBox, EmptyAction, ActionRow, stripScript } from "./shared";
 
-export function ScriptStage({ project, busy, run, readOnly }: StageProps) {
+export function ScriptStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [draft, setDraft] = useState<Script | null>(project.latest_script);
   useEffect(() => setDraft(project.latest_script), [project.latest_script]);
 
@@ -14,6 +14,11 @@ export function ScriptStage({ project, busy, run, readOnly }: StageProps) {
   if (readOnly && draft) {
     return (
       <div className="space-y-6">
+        <StageHeader
+          title="Script Design"
+          detail="Our AI generated this script based on your idea. Refine the flow before approving."
+          providerLabel={providerLabel}
+        />
         <div className="grid gap-4 md:grid-cols-2">
           <MetaBox label="Tone & Style" value={draft.tone} />
           <MetaBox label="Est. Duration" value={draft.estimated_duration} />
@@ -42,6 +47,7 @@ export function ScriptStage({ project, busy, run, readOnly }: StageProps) {
       <StageHeader
         title="Script Design"
         detail="Our AI generated this script based on your idea. Refine the flow before approving."
+        providerLabel={providerLabel}
       />
       {!draft ? (
         <EmptyAction

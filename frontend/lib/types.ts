@@ -60,6 +60,7 @@ export type Project = {
   id: number;
   title: string;
   idea: string;
+  category: string;
   video_format: VideoFormat;
   video_length: VideoLength;
   language: string;
@@ -79,6 +80,7 @@ export type Project = {
 export type ProjectListItem = {
   id: number;
   title: string;
+  category: string;
   video_format: VideoFormat;
   video_length: VideoLength;
   language: string;

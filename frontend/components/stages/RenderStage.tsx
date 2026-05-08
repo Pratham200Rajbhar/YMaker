@@ -4,7 +4,7 @@ import { api, API_BASE, mediaUrl } from "@/lib/api";
 import { Button } from "@/components/ui";
 import { StageProps, StageHeader, ActionRow } from "./shared";
 
-export function RenderStage({ project, busy, run, readOnly }: StageProps) {
+export function RenderStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const video = mediaUrl(project.render?.render_path);
   const isVideo = !!video;
   const status = project.render?.render_status ?? "idle";
@@ -15,6 +15,7 @@ export function RenderStage({ project, busy, run, readOnly }: StageProps) {
       <StageHeader
         title="Final Production"
         detail="The final stage. We'll composite your clips, audio, and subtitles into a finished masterpiece."
+        providerLabel={providerLabel}
       />
 
       <div className="grid gap-6 md:grid-cols-2">

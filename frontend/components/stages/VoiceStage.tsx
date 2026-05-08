@@ -13,13 +13,18 @@ const VOICES = [
   "Magpie-Multilingual.HI-IN.Leo",
 ];
 
-export function VoiceStage({ project, busy, run, readOnly }: StageProps) {
+export function VoiceStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [voice, setVoice] = useState(project.render?.voice_name ?? VOICES[0]);
   const audio = mediaUrl(project.render?.voiceover_path);
 
   if (readOnly) {
     return (
       <div className="space-y-4">
+        <StageHeader
+          title="Audio Forge"
+          detail="Generate your project voiceover using NVIDIA Magpie TTS multilingual models."
+          providerLabel={providerLabel}
+        />
         <div className="flex items-center gap-3">
           <Badge tone="accent" className="px-4">{project.render?.voice_name}</Badge>
           <span className="text-xs font-bold text-zinc-600 uppercase tracking-widest">Audio Master</span>
@@ -47,6 +52,7 @@ export function VoiceStage({ project, busy, run, readOnly }: StageProps) {
       <StageHeader
         title="Audio Forge"
         detail="Generate your project voiceover using NVIDIA Magpie TTS multilingual models."
+        providerLabel={providerLabel}
       />
       <div className="grid gap-6 md:grid-cols-[1fr_200px]">
         <Field label="AI Voice Model">

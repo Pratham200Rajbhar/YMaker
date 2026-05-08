@@ -1,7 +1,9 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..config import settings
 from ..database import get_db
 from ..models import Project, ProjectStatus, Render, Scene, WorkflowStage
 from ..schemas import ProjectCreate, ProjectListItem, ProjectOut
@@ -17,6 +19,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
     project = Project(
         title=title,
         idea=payload.idea.strip(),
+        category=payload.category,
         video_format=payload.video_format,
         video_length=payload.video_length,
         language=payload.language,
@@ -40,6 +43,7 @@ def list_projects(db: Session = Depends(get_db)) -> list[ProjectListItem]:
         ProjectListItem(
             id=item.id,
             title=item.title,
+            category=item.category,
             video_format=item.video_format,
             video_length=item.video_length,
             language=item.language,
@@ -64,6 +68,7 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project_out(project)
+
 
 @router.delete("/{project_id}", status_code=204)
 def delete_project(project_id: int, db: Session = Depends(get_db)):

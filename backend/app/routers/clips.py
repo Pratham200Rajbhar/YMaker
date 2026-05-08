@@ -24,6 +24,7 @@ def fetch_clips(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     if not project.scenes or not all(scene.approved for scene in project.scenes):
         raise HTTPException(status_code=409, detail="Approve scenes before fetching clips")
 
+    scene_count = len(project.scenes)
     try:
         fetched_by_scene: dict[int, list[dict]] = {}
         missing_scenes: list[int] = []
@@ -33,14 +34,17 @@ def fetch_clips(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
                 fetched_by_scene[scene.id] = items
             elif not scene.clips:
                 missing_scenes.append(scene.scene_index)
-    except ClipServiceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    if missing_scenes:
-        raise HTTPException(
-            status_code=502,
-            detail=f"No clip options found for scenes: {', '.join(map(str, missing_scenes))}. Try improving the visual keywords.",
-        )
+        
+        if missing_scenes:
+            raise HTTPException(
+                status_code=502,
+                detail=f"No clip options found for scenes: {', '.join(map(str, missing_scenes))}. Try improving the visual keywords.",
+            )
+        
+    except Exception as exc:
+        if isinstance(exc, ClipServiceError):
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise exc
 
     for scene in project.scenes:
         items = fetched_by_scene.get(scene.id)

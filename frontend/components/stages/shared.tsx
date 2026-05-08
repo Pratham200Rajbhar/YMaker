@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Sparkles, Wand2 } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, Badge } from "@/components/ui";
 import type { Project, ProjectListItem, Script, Scene } from "@/lib/types";
 
 export type RunFn = (label: string, action: () => Promise<Project>) => Promise<void>;
@@ -10,16 +10,24 @@ export type StageProps = {
   busy: string;
   run: RunFn;
   readOnly: boolean;
+  providerLabel?: string;
 };
 
-export function StageHeader({ title, detail }: { title: string; detail?: string }) {
+export function StageHeader({ title, detail, providerLabel }: { title: string; detail?: string; providerLabel?: string }) {
   return (
-    <div className="mb-8">
-      <div className="flex items-center gap-2 mb-1">
-        <Sparkles className="h-4 w-4 text-forge-red" />
-        <h2 className="text-2xl font-black tracking-tight text-white">{title}</h2>
+    <div className="mb-8 flex items-start justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-2 mb-1">
+          <Sparkles className="h-4 w-4 text-forge-red" />
+          <h2 className="text-2xl font-black tracking-tight text-white">{title}</h2>
+        </div>
+        {detail ? <p className="text-sm font-medium text-zinc-500 leading-relaxed max-w-2xl">{detail}</p> : null}
       </div>
-      {detail ? <p className="text-sm font-medium text-zinc-500 leading-relaxed max-w-2xl">{detail}</p> : null}
+      {providerLabel && (
+        <Badge tone="accent" className="mt-1 bg-white/5 border-white/10 text-[10px] py-1 px-2 whitespace-nowrap">
+          Engine: {providerLabel}
+        </Badge>
+      )}
     </div>
   );
 }
