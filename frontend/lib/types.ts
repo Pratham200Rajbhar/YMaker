@@ -104,5 +104,6 @@ export type Settings = {
   vertex_project_id: string | null;
   vertex_location: string;
   gemini_model: string;
+  active_provider_label?: string;
   updated_at: string;
 };

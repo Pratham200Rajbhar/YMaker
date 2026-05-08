@@ -53,7 +53,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     }
     load();
     api.getSettings().then(s => {
-      if (active) setActiveProviderLabel(s.active_provider_label);
+      if (active) setActiveProviderLabel(s.active_provider_label || "");
     }).catch(console.error);
     return () => { active = false; };
   }, [projectId]);

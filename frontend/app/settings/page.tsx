@@ -296,8 +296,8 @@ function ProviderSection({ icon: Icon, children, settings, updateProvider, testC
   updateProvider: (_id: string) => void;
   testConnection: (_id: string) => void;
   busy: boolean;
-  testing: string;
-  testResult: { provider: string; success: boolean; error?: string } | null;
+  testing: string | null;
+  testResult: { provider: string; success: boolean; error: string | null } | null;
 }) {
   const isActive = settings.llm_provider === id;
   return (
