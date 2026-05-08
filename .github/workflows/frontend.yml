@@ -9,12 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./frontend
     env:
       NEXT_PUBLIC_API_BASE: ${{ secrets.NEXT_PUBLIC_API_BASE }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -31,11 +27,11 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --prefix frontend
 
       - name: Lint
-        run: pnpm exec next lint
+        run: pnpm --prefix frontend run lint
 
       - name: Build
-        run: pnpm build
+        run: pnpm --prefix frontend run build
 
