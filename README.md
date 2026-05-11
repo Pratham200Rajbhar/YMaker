@@ -1,4 +1,4 @@
-# ScriptForge
+# MakeVideo
 
 An AI-powered video production pipeline that transforms raw ideas into polished video content. Built with a FastAPI backend and Next.js frontend.
 
@@ -15,7 +15,7 @@ An AI-powered video production pipeline that transforms raw ideas into polished 
 ## Architecture
 
 ```
-IdeaBuilder/
+MakeVideo/
 ├── backend/                    # FastAPI backend
 │   ├── app/
 │   │   ├── main.py           # App entry point
@@ -43,7 +43,7 @@ IdeaBuilder/
 │   │       ├── voiceovers/   # Generated audio files
 │   │       ├── subtitles/    # SRT subtitle files
 │   │       └── renders/      # Final video output
-│   └── scriptforge.db        # SQLite database
+│   └── makevideo.db        # SQLite database
 │
 └── frontend/                 # Next.js frontend
     ├── app/

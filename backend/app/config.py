@@ -9,8 +9,8 @@ STORAGE_DIR = BASE_DIR / "storage"
 
 
 class Settings(BaseSettings):
-    app_name: str = "ScriptForge API"
-    database_url: str = f"sqlite:///{BASE_DIR / 'scriptforge.db'}"
+    app_name: str = "MakeVideo API"
+    database_url: str = f"sqlite:///{BASE_DIR / 'makevideo.db'}"
     frontend_origin: str = "http://localhost:3000"
 
     # Pexels

@@ -270,8 +270,8 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         model = ai_settings.get("openrouter_model", "anthropic/claude-3.5-sonnet")
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/IdeaBuilder",
-            "X-Title": "IdeaBuilder",
+            "HTTP-Referer": "https://github.com/MakeVideo",
+            "X-Title": "MakeVideo",
             "Content-Type": "application/json",
         }
     else:

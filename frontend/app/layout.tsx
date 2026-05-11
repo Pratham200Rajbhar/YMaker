@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ScriptForge",
+  title: "MakeVideo",
   description: "AI-powered YouTube production workflow"
 };
 

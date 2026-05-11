@@ -89,7 +89,7 @@ export default function HomePage() {
               <Clapperboard className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-3xl font-black tracking-tight text-white">ScriptForge</h1>
+              <h1 className="text-3xl font-black tracking-tight text-white">MakeVideo</h1>
               <p className="text-sm font-medium text-zinc-500">Human-reviewed AI video production</p>
             </div>
           </motion.div>
@@ -124,7 +124,7 @@ export default function HomePage() {
               <div className="mb-8">
                 <h2 className="text-3xl font-black tracking-tight text-white md:text-4xl">Forge a video from a rough idea</h2>
                 <p className="mt-3 max-w-2xl text-base leading-relaxed text-zinc-400">
-                  ScriptForge automates script, scenes, and rendering while keeping you in the director&apos;s chair.
+                  MakeVideo automates script, scenes, and rendering while keeping you in the director&apos;s chair.
                 </p>
               </div>
               
