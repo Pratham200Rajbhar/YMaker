@@ -1,8 +1,10 @@
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Project, ProjectStatus
+from ..models import Project, ProjectStatus, WorkflowStage
 from ..schemas import ProjectOut
 from ..services.rendering import render_project
 from ..utils import project_out
@@ -22,6 +24,24 @@ def start(project_id: int, background_tasks: BackgroundTasks, db: Session = Depe
     project = _project(db, project_id)
     if not project.render or not project.render.voiceover_approved:
         raise HTTPException(status_code=400, detail="Voiceover must be generated and approved before rendering.")
+
+    # Validate all scenes have downloaded clips
+    missing_clips = []
+    for scene in project.scenes:
+        selected = next((c for c in scene.clips if c.selected), None)
+        if not selected:
+            missing_clips.append(f"Scene {scene.scene_index} has no selected clip")
+        elif not selected.local_path:
+            missing_clips.append(f"Scene {scene.scene_index} clip not downloaded")
+        elif not Path(selected.local_path).exists():
+            missing_clips.append(f"Scene {scene.scene_index} clip file missing on disk")
+
+    if missing_clips:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot render: " + "; ".join(missing_clips)
+        )
+
     project.render.render_status = "queued"
     project.render.error_message = None
     project.status = ProjectStatus.rendering.value

@@ -96,7 +96,7 @@ export function RenderStage({ project, busy, run, readOnly, providerLabel }: Sta
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                <div className="relative aspect-[9/16] max-h-[500px] mx-auto overflow-hidden rounded-2xl border border-forge-border bg-black shadow-2xl group">
+                <div className={`relative max-h-[500px] mx-auto overflow-hidden rounded-2xl border border-forge-border bg-black shadow-2xl group ${project.video_format === "shorts" ? "aspect-[9/16]" : "aspect-video"}`}>
                   <video
                     className="h-full w-full object-cover"
                     controls
@@ -119,7 +119,7 @@ export function RenderStage({ project, busy, run, readOnly, providerLabel }: Sta
                 key="placeholder"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex aspect-[9/16] max-h-[500px] mx-auto flex-col items-center justify-center rounded-2xl border-2 border-dashed border-forge-border/50 bg-white/[0.02] text-center p-8"
+                className={`flex max-h-[500px] mx-auto flex-col items-center justify-center rounded-2xl border-2 border-dashed border-forge-border/50 bg-white/[0.02] text-center p-8 ${project.video_format === "shorts" ? "aspect-[9/16]" : "aspect-video"}`}
               >
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800">
                   <Wand2 className="h-8 w-8 text-zinc-700" />

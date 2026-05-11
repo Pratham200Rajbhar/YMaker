@@ -240,9 +240,9 @@ export default function SettingsPage() {
           </ProviderSection>
 
           {/* VERTEX */}
-          <ProviderSection 
-            id="vertex" 
-            name="Google Vertex AI" 
+          <ProviderSection
+            id="vertex"
+            name="Google Vertex AI"
             icon={ShieldCheck}
             settings={settings}
             updateProvider={updateProvider}
@@ -281,6 +281,43 @@ export default function SettingsPage() {
               </Field>
             </div>
           </ProviderSection>
+
+          {/* CLIP PROVIDER */}
+          <Panel className="relative overflow-hidden border-white/10 bg-black/40">
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-white/5 text-zinc-500">
+                  <Globe className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">Clip Provider</h2>
+                  <p className="text-sm text-zinc-500">Default stock footage source for new projects</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                { value: "hybrid", label: "Hybrid (All Sources)" },
+                { value: "free", label: "Free Only (Coverr + Mixkit)" },
+                { value: "coverr", label: "Coverr.co (Free, CC0)" },
+                { value: "mixkit", label: "Mixkit (Free)" },
+                { value: "pexels", label: "Pexels (API key required)" },
+                { value: "pixabay", label: "Pixabay (API key required)" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => saveField({ clip_provider: option.value })}
+                  className={`rounded-xl border px-4 py-3 text-left text-sm font-medium transition-all ${
+                    settings.clip_provider === option.value
+                      ? "border-forge-red bg-forge-red/10 text-white"
+                      : "border-white/10 text-zinc-400 hover:border-white/20 hover:text-zinc-200"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </Panel>
         </div>
       </div>
     </main>

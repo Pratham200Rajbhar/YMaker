@@ -16,6 +16,7 @@ class ProjectCreate(BaseModel):
     language: str = "english"
     subtitles_enabled: bool = True
     subtitle_language: str = "english"
+    # Valid values: "pexels", "pixabay", "coverr", "mixkit", "free", "hybrid"
     clip_provider: str | None = None
 
 
@@ -166,6 +167,10 @@ class SettingsOut(BaseModel):
     vertex_project_id: str | None = None
     vertex_location: str
     gemini_model: str
+    nvidia_api_key: str | None = None
+    nvidia_model: str
+    nvidia_tts_model: str
+    clip_provider: str
     updated_at: datetime
 
 
@@ -184,3 +189,7 @@ class SettingsUpdate(BaseModel):
     vertex_project_id: str | None = None
     vertex_location: str | None = None
     gemini_model: str | None = None
+    nvidia_api_key: str | None = None
+    nvidia_model: str | None = None
+    nvidia_tts_model: str | None = None
+    clip_provider: str | None = None

@@ -2,7 +2,6 @@ import logging
 
 import numpy as np
 import soundfile as sf
-import riva.client
 from sqlalchemy.orm import Session
 
 from ..models import Project, Render
@@ -22,6 +21,11 @@ def generate_voiceover(project: Project, voice_name: str, db: Session) -> Render
     Generate voiceover for all scenes using NVIDIA Magpie TTS (NIM API).
     Concatenates the audio for all approved scenes into one file.
     """
+    try:
+        import riva.client
+    except ImportError as exc:
+        raise VoiceServiceError("nvidia-riva-client is not installed. Run: pip install nvidia-riva-client") from exc
+
     if not settings.nvidia_api_key:
         raise VoiceServiceError("NVIDIA_API_KEY not configured")
 
@@ -37,7 +41,7 @@ def generate_voiceover(project: Project, voice_name: str, db: Session) -> Render
         uri="grpc.nvcf.nvidia.com:443",
         use_ssl=True,
         metadata_args=[
-            ["function-id", "877104f7-e885-42b9-8de8-f6e4c6303969"],
+            ["function-id", settings.nvidia_tts_model],
             ["authorization", f"Bearer {settings.nvidia_api_key}"]
         ]
     )

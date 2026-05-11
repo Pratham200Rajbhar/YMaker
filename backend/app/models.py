@@ -1,10 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class VideoFormat(str, Enum):
@@ -24,6 +28,7 @@ class ProjectStatus(str, Enum):
     draft = "draft"
     waiting_review = "waiting_review"
     approved = "approved"
+    downloading_clips = "downloading_clips"
     rendering = "rendering"
     complete = "complete"
     error = "error"
@@ -45,8 +50,8 @@ class Project(Base):
     current_stage: Mapped[str] = mapped_column(String(30), default=WorkflowStage.script.value)
     status: Mapped[str] = mapped_column(String(30), default=ProjectStatus.draft.value)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     scripts: Mapped[list["Script"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     scenes: Mapped[list["Scene"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Scene.scene_index")
@@ -69,7 +74,7 @@ class Script(Base):
     estimated_duration: Mapped[str] = mapped_column(String(80), default="")
     tone: Mapped[str] = mapped_column(String(120), default="")
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
     project: Mapped[Project] = relationship(back_populates="scripts")
 
@@ -125,8 +130,8 @@ class Render(Base):
     music_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     render_status: Mapped[str] = mapped_column(String(30), default="idle")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     project: Mapped[Project] = relationship(back_populates="render")
 
@@ -149,9 +154,17 @@ class Settings(Base):
     openrouter_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     openrouter_model: Mapped[str] = mapped_column(String(100), default="anthropic/claude-3.5-sonnet")
 
+    # NVIDIA
+    nvidia_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    nvidia_model: Mapped[str] = mapped_column(String(100), default="meta/llama-3.1-405b-instruct")
+    nvidia_tts_model: Mapped[str] = mapped_column(String(100), default="877104f7-e885-42b9-8de8-f6e4c6303969")
+
     # Vertex AI
     vertex_project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vertex_location: Mapped[str] = mapped_column(String(100), default="us-central1")
     gemini_model: Mapped[str] = mapped_column(String(100), default="gemini-1.5-pro")
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Clip provider default
+    clip_provider: Mapped[str] = mapped_column(String(20), default="hybrid")
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)

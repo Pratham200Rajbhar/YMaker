@@ -11,7 +11,10 @@ Design:
 import logging
 import math
 import random
+import shutil
+import subprocess
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +24,29 @@ from ..models import Project, ProjectStatus, Render
 from ..storage import ProjectStorage
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level Whisper model cache — loaded once, reused across renders
+_whisper_model_cache: dict[str, Any] = {}
+
+
+def _get_whisper_model(model_name: str = "base") -> Any:
+    """Load Whisper model once and cache it in memory."""
+    if model_name not in _whisper_model_cache:
+        import whisper
+        device = "cuda" if _cuda_available() else "cpu"
+        logger.info("Loading Whisper model '%s' on %s (first time)...", model_name, device)
+        _whisper_model_cache[model_name] = whisper.load_model(model_name, device=device)
+        logger.info("Whisper model '%s' loaded and cached.", model_name)
+    return _whisper_model_cache[model_name]
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
 
 
 class RenderingError(RuntimeError):
@@ -42,8 +68,7 @@ def _srt_time(seconds: float) -> str:
 
 def _generate_whisper_subtitles(audio_path: str, target: Path, language: str = "english") -> list[dict]:
     """Generate subtitles and return per-word timings for karaoke captions."""
-    import whisper
-    model = whisper.load_model("base", device="cuda")
+    model = _get_whisper_model("base")
     language_code = {"hindi": "hi", "english": "en"}.get(language.lower(), language)
     result = model.transcribe(audio_path, word_timestamps=True, language=language_code)
     lines = []
@@ -116,12 +141,10 @@ def _import_moviepy():
     from moviepy import (
         AudioFileClip,
         CompositeAudioClip,
-        CompositeVideoClip,
-        TextClip,
         VideoFileClip,
         concatenate_videoclips,
     )
-    return VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, TextClip, concatenate_videoclips
+    return VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips
 
 
 def _resolve_caption_font(project: Project) -> str:
@@ -174,8 +197,61 @@ def _fit_video_duration(video, duration: float, concatenate_videoclips):
 # Core rendering logic
 # ---------------------------------------------------------------------------
 
+def _burn_subtitles_ffmpeg(
+    input_path: Path,
+    subtitle_path: Path,
+    output_path: Path,
+    video_format: str = "long",
+) -> None:
+    """
+    Burn SRT subtitles into video using FFmpeg subtitles filter.
+    Far faster than MoviePy TextClip — no per-word Python objects.
+    """
+    font_size = 20 if video_format == "long" else 26
+    margin_v = 60 if video_format == "shorts" else 40
+
+    force_style = (
+        f"FontName=Arial,FontSize={font_size},Bold=1,"
+        f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+        f"BorderStyle=1,Outline=2,Shadow=0,"
+        f"Alignment=2,MarginV={margin_v}"
+    )
+
+    srt_escaped = str(subtitle_path).replace("\\", "/").replace(":", "\\:")
+
+    # Filter chain: scale to even dimensions, then burn subtitles
+    # We use trunc(iw/2)*2 to ensure dimensions are even, which libx264 requires.
+    vf = (
+        f"scale='trunc(iw/2)*2':'trunc(ih/2)*2',"
+        f"subtitles='{srt_escaped}':force_style='{force_style}'"
+    )
+    
+    cmd = [
+        settings.ffmpeg_binary, "-y",
+        "-i", str(input_path),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "medium", # Better compression than superfast
+        "-crf", "18",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error("FFmpeg subtitle burn failed: %s", result.stderr[-500:])
+            shutil.copy2(input_path, output_path)
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpeg subtitle burn timed out")
+        shutil.copy2(input_path, output_path)
+    except FileNotFoundError:
+        logger.error("FFmpeg not found at '%s'", settings.ffmpeg_binary)
+        shutil.copy2(input_path, output_path)
+
+
 def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
-    VideoFileClip, AudioFileClip, CompositeAudioClip, CompositeVideoClip, TextClip, concatenate_videoclips = _import_moviepy()
+    VideoFileClip, AudioFileClip, CompositeAudioClip, concatenate_videoclips = _import_moviepy()
 
     size = (1080, 1920) if project.video_format == "shorts" else (1920, 1080)
     font_size = 64 if project.video_format == "shorts" else 52
@@ -253,46 +329,27 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
         render.music_path = None
         final = final.with_audio(voiceover)
 
-    # Karaoke caption overlays
-    overlays = [final]
-    caption_y = int(size[1] * (0.55 if project.video_format == "shorts" else 0.85))
-    for word in word_timings:
-        duration = max(0.01, float(word["end"]) - float(word["start"]))
-        caption = (
-            TextClip(
-                text=word["text"],
-                font=font_path,
-                font_size=font_size,
-                color="white",
-                stroke_color="black",
-                stroke_width=3,
-            )
-            .with_position(("center", caption_y))
-            .with_start(float(word["start"]))
-            .with_duration(duration)
-        )
-        overlays.append(caption)
+    # Write raw video WITHOUT subtitles first (much faster — no TextClip objects)
+    raw_output = storage.get_render_path().with_stem("raw_render")
+    raw_output.parent.mkdir(parents=True, exist_ok=True)
 
-    final = CompositeVideoClip(overlays)
-
-    output = storage.get_render_path()
     fps = 30 if project.video_format == "shorts" else 60
 
     try:
         logger.info("Starting render with GPU acceleration (h264_nvenc)...")
         final.write_videofile(
-            str(output),
+            str(raw_output),
             fps=fps,
             codec="h264_nvenc",
             audio_codec="aac",
-            preset="p4",  # NVENC uses different presets (p1-p7), 'p4' is medium
+            preset="p4",
             threads=4,
             logger=None,
         )
     except Exception as exc:
         logger.warning("GPU render failed, falling back to CPU (libx264). Error: %s", exc)
         final.write_videofile(
-            str(output),
+            str(raw_output),
             fps=fps,
             codec="libx264",
             audio_codec="aac",
@@ -300,7 +357,21 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
             threads=4,
             logger=None,
         )
-    
+
+    output = storage.get_render_path()
+
+    # Burn subtitles via FFmpeg (10x faster than TextClip overlays)
+    if project.subtitles_enabled and render.subtitle_path and Path(render.subtitle_path).exists():
+        _burn_subtitles_ffmpeg(
+            input_path=raw_output,
+            subtitle_path=Path(render.subtitle_path),
+            output_path=output,
+            video_format=project.video_format,
+        )
+        raw_output.unlink(missing_ok=True)
+    else:
+        raw_output.rename(output)
+
     render.render_path = str(output)
     db.flush()
     logger.info("Render complete: %s", output)

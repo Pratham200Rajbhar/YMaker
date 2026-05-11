@@ -104,6 +104,10 @@ export type Settings = {
   vertex_project_id: string | null;
   vertex_location: string;
   gemini_model: string;
+  nvidia_api_key: string | null;
+  nvidia_model: string;
+  nvidia_tts_model: string;
+  clip_provider: string;
   active_provider_label?: string;
   updated_at: string;
 };

@@ -236,7 +236,7 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         },
     }
     try:
-        response = requests.post(url, json=payload, timeout=180)
+        response = requests.post(url, json=payload, timeout=60)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise AiServiceError(f"Ollama connection error: {exc}") from exc
@@ -274,6 +274,14 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
             "X-Title": "MakeVideo",
             "Content-Type": "application/json",
         }
+    elif provider == "nvidia":
+        url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        api_key = ai_settings.get("nvidia_api_key")
+        model = ai_settings.get("nvidia_model", "meta/llama-3.1-405b-instruct")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
     else:
         url = "https://api.openai.com/v1/chat/completions"
         api_key = ai_settings.get("openai_api_key")
@@ -290,17 +298,15 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         "model": model,
         "messages": messages,
         "temperature": 0.7,
+        "max_tokens": 4096,  # Ensure enough space for large JSON outputs
     }
-
-    if provider == "openrouter":
-        payload["reasoning"] = {"enabled": False}
 
     # Start with JSON mode enabled
     payload["response_format"] = {"type": "json_object"}
 
-    max_retries = 3
-    retry_delay = 2
-    timeout = 300  # Increased to 5 minutes for "too much step" tasks
+    max_retries = 5
+    retry_delay = 5
+    timeout = 120  # 2 minutes
 
     for attempt in range(max_retries):
         try:
@@ -316,11 +322,12 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
                     continue  # Retry immediately without JSON mode
 
             # 2. Handle transient errors (5xx) or OpenRouter provider errors
-            if response.status_code >= 500 or (response.status_code == 400 and "Provider returned error" in response.text):
+            is_provider_error = response.status_code == 400 and "Provider returned error" in response.text
+            if response.status_code >= 500 or is_provider_error or response.status_code == 429:
                 if attempt < max_retries - 1:
-                    logger.warning(f"Transient error ({response.status_code}), retrying in {retry_delay}s...")
+                    logger.warning(f"Transient error ({response.status_code}) from {provider}, retrying in {retry_delay}s...")
                     time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
+                    retry_delay *= 1.5  # Slightly slower growth
                     continue
             
             # 3. Raise for other status codes
@@ -394,7 +401,9 @@ def _gemini_json(prompt: str, schema: dict[str, Any], ai_settings: dict[str, Any
 # ---------------------------------------------------------------------------
 
 def _get_ai_settings() -> dict[str, Any]:
-    """Fetch current AI settings from the database."""
+    """Fetch current AI settings from the database, falling back to .env defaults."""
+    from ..config import settings as env_settings
+
     with SessionLocal() as db:
         s = db.scalar(select(Settings))
         if not s:
@@ -402,18 +411,20 @@ def _get_ai_settings() -> dict[str, Any]:
             db.add(s)
             db.commit()
             db.refresh(s)
-        
+
         return {
-            "provider": s.llm_provider,
-            "ollama_base_url": s.ollama_base_url,
-            "ollama_model": s.ollama_model,
-            "openai_api_key": s.openai_api_key,
-            "openai_model": s.openai_model,
-            "openrouter_api_key": s.openrouter_api_key,
-            "openrouter_model": s.openrouter_model,
-            "vertex_project_id": s.vertex_project_id,
-            "vertex_location": s.vertex_location,
-            "gemini_model": s.gemini_model,
+            "provider": s.llm_provider or env_settings.llm_provider,
+            "ollama_base_url": s.ollama_base_url or env_settings.ollama_base_url,
+            "ollama_model": s.ollama_model or env_settings.ollama_model,
+            "openai_api_key": s.openai_api_key or env_settings.openai_api_key,
+            "openai_model": s.openai_model or env_settings.openai_model,
+            "openrouter_api_key": s.openrouter_api_key or env_settings.openrouter_api_key,
+            "openrouter_model": s.openrouter_model or env_settings.openrouter_model,
+            "vertex_project_id": s.vertex_project_id or env_settings.vertex_project_id,
+            "vertex_location": s.vertex_location or env_settings.vertex_location,
+            "gemini_model": s.gemini_model or env_settings.gemini_model,
+            "nvidia_api_key": s.nvidia_api_key or env_settings.nvidia_api_key,
+            "nvidia_model": s.nvidia_model or env_settings.nvidia_model,
         }
 
 
@@ -455,6 +466,9 @@ def _generate_json(
     
     if provider == "openrouter":
         return _openai_chat(messages, schema, ai_settings, provider="openrouter")
+    
+    if provider == "nvidia":
+        return _openai_chat(messages, schema, ai_settings, provider="nvidia")
     
     if provider == "vertex":
         # Vertex AI — combine into a single prompt string
@@ -556,6 +570,8 @@ def generate_scenes(script_text: str, video_format: str, language: str = "englis
         "You are a YouTube video director. "
         "Break scripts into concrete, searchable stock-video scenes. "
         "visual_keyword must always be 3 to 6 words, concrete, and specific: subject plus action plus setting. "
+        "Avoid specific trademarks or copyrighted names (e.g. DOOM, Mario, Cyberpunk) in visual_keyword. "
+        "Instead, use descriptive phrases that capture the vibe: 'retro 16-bit pixel art character jumping', 'futuristic neon city street rainy night', 'gamer hands on mechanical keyboard close up'. "
         "Never use abstract words in visual_keyword: success, growth, innovation, concept, idea, future, hope, journey, path, vision. "
         "Adjacent scenes must have different keywords; no two consecutive scenes may use the same keyword or very similar keywords. "
         "voiceover_text for each scene must map exactly to the corresponding portion of the approved script, word for word. "
@@ -565,6 +581,7 @@ def generate_scenes(script_text: str, video_format: str, language: str = "englis
         f"Break this script into scenes.\nFormat: {video_format}\nRules: {count_rule}\n\n"
         f"Script:\n{script_text}\n\n"
         f"Language: {language}\n"
+        "CRITICAL: visual_keyword MUST always be in English, even if the script is in another language.\n"
         "scene_index, description, visual_keyword, voiceover_text, duration_seconds."
     )
     result = _generate_json(system_prompt, user_prompt, SCENES_SCHEMA)
@@ -605,14 +622,17 @@ def optimize_visual_keyword(description: str, current_keyword: str) -> str:
 
 def select_best_clips(scenes_data: list[dict]) -> list[dict]:
     """
-    Pick the best clip for each scene from a list of candidates.
-    Input: list of {scene_id, description, candidates: [{clip_id, name}]}
+    Pick the best clip for each scene from candidates.
+    Input: list of {scene_id, description, visual_keyword, candidates: [{clip_id, name, source, duration, thumbnail}]}
     Output: list of {scene_id, selected_clip_id}
     """
     system_prompt = (
-        "You are an expert video editor. "
-        "For each scene, choose the ONE clip from the candidates that best matches the scene description. "
-        "The candidates have descriptive names (slugs) from Pexels. "
+        "You are an expert video editor choosing B-roll footage. "
+        "For each scene, choose the ONE clip that best matches the scene description and visual keyword. "
+        "Use the clip name, source tags, and duration to judge relevance. "
+        "Prefer clips whose name/tags semantically match the scene action and setting. "
+        "Prefer clips with duration >= scene implied duration when available. "
+        "Avoid generic clips (sky, abstract, bokeh) when a specific match exists. "
         "Return ONLY a JSON object with a 'selections' array."
     )
     user_prompt = f"Scenes and their clip candidates:\n{json.dumps(scenes_data, indent=2)}"
@@ -623,18 +643,23 @@ def select_best_clips(scenes_data: list[dict]) -> list[dict]:
 def score_clips_for_scene(scene_description: str, scene_keyword: str, clips: list[dict]) -> list[dict]:
     """
     Score candidate clips for a single scene by visual relevance.
-    Input clips contain {clip_id, name, source, duration}.
-    Output is sorted by score descending.
+    Input clips contain {clip_id, name, source, duration, thumbnail}.
     """
     system_prompt = (
-        "You are an expert video editor scoring stock video candidates for visual relevance to a scene. "
-        "Score each clip from 0.0 to 1.0 based on how specifically it matches the scene description and keyword. "
-        "Favor concrete subject/action/setting matches over generic mood matches. "
+        "You are an expert video editor scoring B-roll stock footage for visual relevance. "
+        "Score each clip 0.0–1.0 based on how well its name, tags, and source metadata match the scene. "
+        "Score criteria: "
+        "1.0 = exact subject+action+setting match. "
+        "0.7 = correct subject, similar action. "
+        "0.4 = related domain but vague. "
+        "0.1 = generic/unrelated. "
+        "Penalize clips with generic names like 'untitled', 'video', single words. "
+        "Boost clips whose name contains words from the visual keyword. "
         "Return ONLY a JSON object with a scored_clips array."
     )
     user_prompt = (
         f"Scene description:\n{scene_description}\n\n"
-        f"Scene visual keyword:\n{scene_keyword}\n\n"
+        f"Visual keyword:\n{scene_keyword}\n\n"
         f"Clip candidates:\n{json.dumps(clips, indent=2)}"
     )
     result = _generate_json(system_prompt, user_prompt, CLIP_SCORER_SCHEMA)

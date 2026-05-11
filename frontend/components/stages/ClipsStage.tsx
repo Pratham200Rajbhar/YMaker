@@ -5,6 +5,20 @@ import { api } from "@/lib/api";
 import { Button, Badge } from "@/components/ui";
 import { StageProps, StageHeader, EmptyAction, ActionRow } from "./shared";
 
+const SOURCE_COLORS: Record<string, string> = {
+  pexels: "border-emerald-500/40 bg-emerald-500/90 text-white",
+  pixabay: "border-yellow-400/40 bg-yellow-400/90 text-zinc-950",
+  coverr: "border-blue-500/40 bg-blue-500/90 text-white",
+  mixkit: "border-purple-500/40 bg-purple-500/90 text-white",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  pexels: "Pexels",
+  pixabay: "Pixabay",
+  coverr: "Coverr",
+  mixkit: "Mixkit",
+};
+
 export function ClipsStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const hasClips = project.scenes.some((scene) => scene.clips.length > 0);
 
@@ -76,11 +90,8 @@ export function ClipsStage({ project, busy, run, readOnly, providerLabel }: Stag
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 {scene.clips.map((clip) => {
-                  const sourceLabel = clip.source === "pixabay" ? "Pixabay" : "Pexels";
-                  const sourceBadgeClass =
-                    clip.source === "pixabay"
-                      ? "border-yellow-400/40 bg-yellow-400/90 text-zinc-950"
-                      : "border-emerald-500/40 bg-emerald-500/90 text-white";
+                  const sourceBadgeClass = SOURCE_COLORS[clip.source] ?? "border-zinc-500/40 bg-zinc-500/90 text-white";
+                  const sourceLabel = SOURCE_LABELS[clip.source] ?? clip.source;
                   return (
                   <motion.button
                     key={clip.id}
@@ -99,13 +110,28 @@ export function ClipsStage({ project, busy, run, readOnly, providerLabel }: Stag
                         {sourceLabel}
                       </span>
                       {clip.image_url ? (
-                        <Image
-                          src={clip.image_url}
-                          alt=""
-                          width={400}
-                          height={225}
-                          className={`h-full w-full object-cover transition-transform duration-500 ${clip.selected ? "scale-105" : "group-hover:scale-105"}`}
-                        />
+                        clip.image_url.toLowerCase().endsWith(".mp4") ? (
+                          <video
+                            src={clip.image_url}
+                            className={`h-full w-full object-cover transition-transform duration-500 ${clip.selected ? "scale-105" : "group-hover:scale-105"}`}
+                            muted
+                            playsInline
+                            loop
+                            autoPlay
+                          />
+                        ) : (
+                          <Image
+                            src={clip.image_url}
+                            alt=""
+                            width={400}
+                            height={225}
+                            unoptimized
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                            className={`h-full w-full object-cover transition-transform duration-500 ${clip.selected ? "scale-105" : "group-hover:scale-105"}`}
+                          />
+                        )
                       ) : (
                         <div className="flex h-full items-center justify-center text-[10px] font-bold uppercase tracking-widest text-zinc-700">
                           No Preview

@@ -61,3 +61,16 @@ def init_db() -> None:
             if "video_length" not in columns:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN video_length TEXT NOT NULL DEFAULT 'auto'"))
                 conn.commit()
+
+            # Check for NVIDIA columns in settings
+            res = conn.execute(text("PRAGMA table_info(settings)"))
+            setting_columns = [row[1] for row in res.fetchall()]
+            if "nvidia_api_key" not in setting_columns:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_api_key TEXT"))
+                conn.commit()
+            if "nvidia_model" not in setting_columns:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_model TEXT NOT NULL DEFAULT 'meta/llama-3.1-405b-instruct'"))
+                conn.commit()
+            if "nvidia_tts_model" not in setting_columns:
+                conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_tts_model TEXT NOT NULL DEFAULT '877104f7-e885-42b9-8de8-f6e4c6303969'"))
+                conn.commit()

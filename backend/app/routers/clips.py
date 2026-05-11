@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -7,6 +9,8 @@ from ..schemas import ProjectOut
 from ..services.ai import AiServiceError, select_best_clips
 from ..services.clips import ClipServiceError, download_selected_clip, fetch_clip_options
 from ..utils import project_out
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/clips", tags=["clips"])
 
@@ -78,25 +82,67 @@ def select_clip(project_id: int, scene_id: int, clip_id: int, db: Session = Depe
 
 
 @router.post("/approve", response_model=ProjectOut)
-def approve_clips(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
+def approve_clips(
+    project_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> ProjectOut:
     project = _project(db, project_id)
     if not project.scenes:
         raise HTTPException(status_code=400, detail="No scenes available")
+
     for scene in project.scenes:
         selected = next((clip for clip in scene.clips if clip.selected), None)
         if not selected:
-            raise HTTPException(status_code=409, detail=f"Scene {scene.scene_index} needs one selected clip")
-        if not selected.local_path:
-            try:
-                selected.local_path = download_selected_clip(project.id, selected)
-            except ClipServiceError as exc:
-                raise HTTPException(status_code=502, detail=f"Scene {scene.scene_index}: {exc}") from exc
+            raise HTTPException(
+                status_code=409,
+                detail=f"Scene {scene.scene_index} needs one selected clip",
+            )
 
-    project.current_stage = WorkflowStage.voiceover.value
-    project.status = ProjectStatus.approved.value
+    project.status = ProjectStatus.downloading_clips.value
     db.commit()
+
+    background_tasks.add_task(_download_all_clips_bg, project_id)
+
     db.refresh(project)
     return project_out(project)
+
+
+def _download_all_clips_bg(project_id: int) -> None:
+    """Background task: download all selected clips, then advance stage."""
+    from ..database import SessionLocal
+    from ..models import Project, ProjectStatus, WorkflowStage
+
+    db = SessionLocal()
+    try:
+        project = db.get(Project, project_id)
+        if not project:
+            return
+
+        errors = []
+        for scene in project.scenes:
+            selected = next((c for c in scene.clips if c.selected), None)
+            if not selected or selected.local_path:
+                continue
+            try:
+                selected.local_path = download_selected_clip(project.id, selected)
+                db.flush()
+            except ClipServiceError as exc:
+                errors.append(f"Scene {scene.scene_index}: {exc}")
+
+        if errors:
+            project.status = ProjectStatus.error.value
+            project.error_message = "; ".join(errors)
+        else:
+            project.current_stage = WorkflowStage.voiceover.value
+            project.status = ProjectStatus.approved.value
+            project.error_message = None
+
+        db.commit()
+    except Exception as exc:
+        logger.exception("Background clip download failed for project %d: %s", project_id, exc)
+    finally:
+        db.close()
 
 
 @router.post("/auto-select", response_model=ProjectOut)
@@ -105,16 +151,25 @@ def auto_select_clips(project_id: int, db: Session = Depends(get_db)) -> Project
     if not project.scenes:
         raise HTTPException(status_code=400, detail="No scenes available")
 
-    # Build input for AI
     scenes_data = []
     for scene in project.scenes:
         if not scene.clips:
             continue
-        candidates = [{"clip_id": c.id, "name": c.name} for c in scene.clips]
+        candidates = [
+            {
+                "clip_id": c.id,
+                "name": c.name or "",
+                "source": c.source,
+                "duration": c.duration,
+                "thumbnail": c.image_url or c.preview_url or "",
+            }
+            for c in scene.clips
+        ]
         scenes_data.append({
             "scene_id": scene.id,
             "description": scene.description,
-            "candidates": candidates
+            "visual_keyword": scene.visual_keyword,
+            "candidates": candidates,
         })
 
     if not scenes_data:

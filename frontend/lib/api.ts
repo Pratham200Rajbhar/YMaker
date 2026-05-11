@@ -1,21 +1,66 @@
 import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength, Settings } from "./types";
+import { logger } from "./logger";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 800;
+
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail ?? "Request failed");
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {}),
+        },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        const errorMsg = body.detail ?? `HTTP ${res.status}: ${res.statusText}`;
+        logger.error(`API Request failed: ${init?.method ?? "GET"} ${path}`, {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorMsg,
+          attempt,
+        });
+        throw new Error(errorMsg);
+      }
+
+      // Handle 204 No Content and empty body responses
+      if (res.status === 204) {
+        return undefined as T;
+      }
+      const text = await res.text();
+      if (!text) {
+        return undefined as T;
+      }
+      return JSON.parse(text) as T;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Don't retry client errors (4xx) except 408/429
+      if (err instanceof Error && err.message.includes("HTTP 4")) {
+        const status = parseInt(err.message.match(/HTTP (\d+)/)?.[1] ?? "0", 10);
+        if (status !== 408 && status !== 429) {
+          throw err;
+        }
+      }
+      if (attempt < MAX_RETRIES) {
+        await sleep(RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
   }
-  return res.json();
+
+  throw lastError ?? new Error("Request failed after retries");
 }
 
 export const api = {

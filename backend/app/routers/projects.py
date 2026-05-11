@@ -16,6 +16,12 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.post("", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectOut:
     title = payload.idea.strip().splitlines()[0][:80] or "Untitled Project"
+
+    # Use DB settings clip_provider as default, fall back to env config
+    from ..models import Settings as SettingsModel
+    db_settings = db.scalar(select(SettingsModel))
+    default_clip_provider = db_settings.clip_provider if db_settings else settings.clip_provider
+
     project = Project(
         title=title,
         idea=payload.idea.strip(),
@@ -25,7 +31,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
         language=payload.language,
         subtitles_enabled=payload.subtitles_enabled,
         subtitle_language=payload.subtitle_language,
-        clip_provider=settings.clip_provider,
+        clip_provider=payload.clip_provider or default_clip_provider,
         current_stage=WorkflowStage.script.value,
         status=ProjectStatus.draft.value,
     )

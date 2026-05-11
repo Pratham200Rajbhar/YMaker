@@ -20,7 +20,25 @@ def get_settings(db: Session = Depends(get_db)) -> SettingsWithLabel:
         db.refresh(settings)
     
     labels = {"ollama":"Ollama (Local)","openai":"OpenAI","openrouter":"OpenRouter","vertex":"Google Vertex AI"}
-    return SettingsWithLabel(**settings.__dict__, active_provider_label=labels.get(settings.llm_provider, settings.llm_provider))
+    data = {
+        "id": settings.id,
+        "llm_provider": settings.llm_provider,
+        "ollama_base_url": settings.ollama_base_url,
+        "ollama_model": settings.ollama_model,
+        "openai_api_key": settings.openai_api_key,
+        "openai_model": settings.openai_model,
+        "openrouter_api_key": settings.openrouter_api_key,
+        "openrouter_model": settings.openrouter_model,
+        "vertex_project_id": settings.vertex_project_id,
+        "vertex_location": settings.vertex_location,
+        "gemini_model": settings.gemini_model,
+        "nvidia_api_key": settings.nvidia_api_key,
+        "nvidia_model": settings.nvidia_model,
+        "nvidia_tts_model": settings.nvidia_tts_model,
+        "clip_provider": settings.clip_provider,
+        "updated_at": settings.updated_at,
+    }
+    return SettingsWithLabel(**data, active_provider_label=labels.get(settings.llm_provider, settings.llm_provider))
 
 
 @router.post("/test")

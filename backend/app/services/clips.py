@@ -14,9 +14,11 @@ from tempfile import NamedTemporaryFile
 
 import requests
 
+from urllib.parse import quote
+
 from ..config import settings
 from ..models import Clip, Project, Scene
-from ..services.ai import optimize_visual_keyword, score_clips_for_scene
+from ..services.ai import score_clips_for_scene
 from ..storage import ProjectStorage
 
 logger = logging.getLogger(__name__)
@@ -89,7 +91,7 @@ def _fetch_pexels_clips(keyword: str, project: Project, per_page: int = 6) -> li
                 "per_page": per_page,
             },
             headers={"Authorization": settings.pexels_api_key},
-            timeout=20,
+            timeout=25,
         )
         response.raise_for_status()
     except requests.HTTPError as exc:
@@ -105,6 +107,119 @@ def _fetch_pexels_clips(keyword: str, project: Project, per_page: int = 6) -> li
         if item:
             items.append(item)
     return items
+
+
+def _fetch_coverr_clips(keyword: str, project: Project, per_page: int = 6) -> list[dict]:
+    """
+    Search Coverr.co for CC0 stock clips. No API key required.
+    Coverr JSON API: https://coverr.co/api/videos?keywords=<query>&page=1
+    """
+    orientation_filter = "portrait" if project.video_format == "shorts" else "landscape"
+    try:
+        response = requests.get(
+            "https://coverr.co/api/videos",
+            params={
+                "keywords": keyword,
+                "page": 1,
+                "per_page": per_page,
+            },
+            headers={"User-Agent": "YMaker/1.0"},
+            timeout=25,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Coverr connection failed for '%s': %s", keyword, exc)
+        return []
+
+    items = []
+    for video in response.json().get("hits", []):
+        base_filename = video.get("base_filename")
+        if not base_filename:
+            continue
+        mp4_url = f"https://cdn.coverr.co/videos/{base_filename}/1080p.mp4"
+        width = video.get("max_width") or video.get("width") or 1920
+        height = video.get("max_height") or video.get("height") or 1080
+        is_portrait = height > width
+        if orientation_filter == "portrait" and not is_portrait:
+            continue
+        if orientation_filter == "landscape" and is_portrait:
+            continue
+        duration = video.get("duration")
+        try:
+            duration = float(duration) if duration is not None else None
+        except (ValueError, TypeError):
+            duration = None
+        items.append({
+            "source_id": str(video.get("id", "")),
+            "source": "coverr",
+            "url": mp4_url,
+            "preview_url": video.get("poster") or video.get("thumbnail"),
+            "image_url": video.get("poster") or video.get("thumbnail"),
+            "width": width,
+            "height": height,
+            "duration": duration,
+            "name": video.get("title") or keyword,
+        })
+    return items[:per_page]
+
+
+def _fetch_mixkit_clips(keyword: str, project: Project, per_page: int = 6) -> list[dict]:
+    """
+    Search Mixkit for free stock clips via HTML scraping.
+    Mixkit has no public JSON API — we extract video IDs from embedded CDN URLs.
+    """
+    import re
+
+    try:
+        response = requests.get(
+            "https://mixkit.co/free-stock-video/",
+            params={"q": keyword},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; YMaker/1.0)"},
+            timeout=25,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Mixkit connection failed for '%s': %s", keyword, exc)
+        return []
+
+    html = response.text
+
+    # Extract video IDs from embedded CDN URLs: assets.mixkit.co/videos/{id}/{id}-360.mp4
+    seen_ids: set[str] = set()
+    items: list[dict] = []
+    for m in re.finditer(
+        r"(?:assets\.mixkit\.co|mixkit\.co)/videos/(\d+)/\1-\d+\.mp4", html
+    ):
+        vid_id = m.group(1)
+        if vid_id in seen_ids:
+            continue
+        seen_ids.add(vid_id)
+
+        # Try to find a title from nearby alt attributes
+        context_start = max(0, m.start() - 800)
+        context = html[context_start:m.end()]
+        alt_match = re.search(r'alt="([^"]{5,80})"', context)
+        title = alt_match.group(1) if alt_match else keyword
+
+        # Skip generic / UI alt texts
+        if title in ("Mixkit home.", "Envato Elements", "Open menu", "Close menu", "Search"):
+            title = keyword
+
+        # Build CDN URLs — 720p is a good balance of quality vs size
+        base = f"https://assets.mixkit.co/videos/{vid_id}/{vid_id}"
+        items.append({
+            "source_id": vid_id,
+            "source": "mixkit",
+            "url": f"{base}-720.mp4",
+            "preview_url": f"{base}-360.mp4",
+            "image_url": f"{base}-360.mp4",
+            "width": 1280,
+            "height": 720,
+            "duration": None,
+            "name": title,
+        })
+
+    return items[:per_page]
 
 
 def _best_pixabay_video(video: dict) -> dict:
@@ -151,7 +266,7 @@ def _fetch_pixabay_clips(keyword: str, project: Project, per_page: int = 6) -> l
                 "orientation": orientation,
                 "per_page": per_page,
             },
-            timeout=20,
+            timeout=25,
         )
         response.raise_for_status()
     except requests.HTTPError as exc:
@@ -203,7 +318,9 @@ def _refresh_pixabay_clip(clip: Clip) -> dict | None:
 
 
 def _refresh_clip_url(clip: Clip) -> None:
-    """Refresh provider download URLs because stock CDN links can expire."""
+    """Refresh provider download URLs. Coverr/Mixkit are static CDN — no refresh needed."""
+    if clip.source in ("coverr", "mixkit"):
+        return
     refreshed = _refresh_pixabay_clip(clip) if clip.source == "pixabay" else _refresh_pexels_clip(clip)
     if not refreshed:
         return
@@ -229,44 +346,80 @@ def _validate_video_file(path: Path) -> None:
         raise ClipServiceError(f"Downloaded clip failed video validation: {exc}") from exc
 
 
+def _generate_keyword_variants(description: str, original_keyword: str) -> list[str]:
+    """
+    Generate 3 progressively simpler keyword variants to use as fallbacks.
+    Does NOT call AI — uses simple heuristics to avoid extra latency.
+    """
+    words = original_keyword.lower().split()
+    variants = []
+    if len(words) > 2:
+        variants.append(" ".join(words[:-1]))
+    if len(words) > 1:
+        variants.append(" ".join(words[:2]))
+    variants.append(words[0])
+    seen = {original_keyword.lower()}
+    return [v for v in variants if v not in seen]
+
+
 def fetch_clip_options(scene: Scene, project: Project, per_page: int = 6) -> list[dict]:
     """Search stock providers for clips matching the scene keyword, then AI-rank them."""
     provider = project.clip_provider or settings.clip_provider
-    
-    pexels_items = []
-    pixabay_items = []
-    
+
+    pexels_items: list[dict] = []
+    pixabay_items: list[dict] = []
+    coverr_items: list[dict] = []
+    mixkit_items: list[dict] = []
+
     if provider in ("pexels", "hybrid"):
         pexels_items = _fetch_pexels_clips(scene.visual_keyword, project, min(per_page, 6))
-    
+
     if provider in ("pixabay", "hybrid"):
         pixabay_items = _fetch_pixabay_clips(scene.visual_keyword, project, 6)
-        
-    items = pexels_items + pixabay_items
 
+    if provider in ("coverr", "hybrid", "free"):
+        coverr_items = _fetch_coverr_clips(scene.visual_keyword, project, 6)
+
+    if provider in ("mixkit", "hybrid", "free"):
+        mixkit_items = _fetch_mixkit_clips(scene.visual_keyword, project, 6)
+
+    # Merge: interleave sources for diversity, deduplicate by url
+    seen_urls: set[str] = set()
+    items: list[dict] = []
+    for group in [pexels_items, coverr_items, pixabay_items, mixkit_items]:
+        for item in group:
+            url = item.get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                items.append(item)
+
+    # Fallback with keyword variants if nothing found
     if not items:
         logger.warning("No clips found for keyword '%s' (scene %d)", scene.visual_keyword, scene.scene_index)
-        try:
-            fallback_keyword = optimize_visual_keyword(scene.description, scene.visual_keyword)
-            logger.info("Retrying fetch with fallback keyword '%s' for scene %d", fallback_keyword, scene.scene_index)
-            
+        keyword_variants = _generate_keyword_variants(scene.description, scene.visual_keyword)
+        for fallback_keyword in keyword_variants:
+            logger.info("Retrying with fallback keyword '%s' for scene %d", fallback_keyword, scene.scene_index)
             if provider in ("pexels", "hybrid"):
-                items += _fetch_pexels_clips(fallback_keyword, project, 6)
-            if provider in ("pixabay", "hybrid") and not items:
-                 items += _fetch_pixabay_clips(fallback_keyword, project, 6)
-        except Exception as exc:
-            logger.warning("Fallback keyword clip search failed for scene %d: %s", scene.scene_index, exc)
+                items += _fetch_pexels_clips(fallback_keyword, project, 4)
+            if provider in ("coverr", "hybrid", "free"):
+                items += _fetch_coverr_clips(fallback_keyword, project, 4)
+            if provider in ("pixabay", "hybrid"):
+                items += _fetch_pixabay_clips(fallback_keyword, project, 4)
+            if items:
+                break
 
     if not items:
         return []
 
+    # AI scoring using thumbnail URLs (multimodal-aware scoring)
     try:
         scoring_input = [
             {
                 "clip_id": str(index),
                 "name": clip.get("name") or "",
-                "source": clip.get("source", "pexels"),
+                "source": clip.get("source", "unknown"),
                 "duration": clip.get("duration"),
+                "thumbnail": clip.get("image_url") or clip.get("preview_url") or "",
             }
             for index, clip in enumerate(items)
         ]
@@ -278,7 +431,7 @@ def fetch_clip_options(scene: Scene, project: Project, per_page: int = 6) -> lis
     except Exception as exc:
         logger.warning("AI clip scoring failed for scene %d: %s", scene.scene_index, exc)
 
-    return items[:8]
+    return items[:10]
 
 
 def download_selected_clip(project_id: int, clip: Clip) -> str:
