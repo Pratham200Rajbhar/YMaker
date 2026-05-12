@@ -52,3 +52,5 @@ logs/
 ## Local models
 backend/models_data/
 *.onnx
+
+/storage/
