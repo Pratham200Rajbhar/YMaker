@@ -1,7 +1,6 @@
 """Router for receiving logs from the frontend."""
 
 import logging
-from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -14,12 +13,12 @@ class LogEntry(BaseModel):
     level: str
     message: str
     timestamp: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, object] | None = None
 
 
 class LogRequest(BaseModel):
     """A collection of log entries from the frontend."""
-    logs: List[LogEntry]
+    logs: list[LogEntry]
 
 
 @router.post("")
@@ -31,7 +30,7 @@ async def receive_logs(payload: LogRequest):
         extra = {
             "frontend_timestamp": entry.timestamp,
             "source": "frontend",
-            **(entry.metadata or {})
+            "frontend_metadata": entry.metadata or {},
         }
 
         if entry.level.lower() == "error":

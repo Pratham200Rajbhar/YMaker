@@ -14,8 +14,6 @@ from tempfile import NamedTemporaryFile
 
 import requests
 
-from urllib.parse import quote
-
 from ..config import settings
 from ..models import Clip, Project, Scene
 from ..services.ai import score_clips_for_scene

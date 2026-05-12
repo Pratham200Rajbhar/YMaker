@@ -36,12 +36,15 @@ def create_scenes(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
 
     project.scenes.clear()
     for item in scene_items:
+        duration = float(item["duration_seconds"])
+        if duration < 0.5:
+            duration = 0.5
         project.scenes.append(
             Scene(
                 scene_index=item["scene_index"],
                 description=item["description"],
                 visual_keyword=item["visual_keyword"],
-                duration_seconds=float(item["duration_seconds"]),
+                duration_seconds=duration,
                 voiceover_text=item["voiceover_text"],
             )
         )

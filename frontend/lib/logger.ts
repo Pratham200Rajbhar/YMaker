@@ -6,14 +6,14 @@ interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 class Logger {
   private buffer: LogEntry[] = [];
   private flushInterval = 5000; // 5 seconds
   private maxBufferSize = 50;
-  private timer: NodeJS.Timeout | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -52,7 +52,7 @@ class Logger {
     }
   }
 
-  private log(level: LogLevel, message: string, metadata?: Record<string, any>) {
+  private log(level: LogLevel, message: string, metadata?: Record<string, unknown>) {
     const entry: LogEntry = {
       level,
       message,
@@ -75,15 +75,15 @@ class Logger {
     }
   }
 
-  info(message: string, metadata?: Record<string, any>) {
+  info(message: string, metadata?: Record<string, unknown>) {
     this.log("info", message, metadata);
   }
 
-  warn(message: string, metadata?: Record<string, any>) {
+  warn(message: string, metadata?: Record<string, unknown>) {
     this.log("warn", message, metadata);
   }
 
-  error(message: string, metadata?: Record<string, any>) {
+  error(message: string, metadata?: Record<string, unknown>) {
     this.log("error", message, metadata);
   }
 }

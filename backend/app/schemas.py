@@ -40,8 +40,6 @@ class SceneUpdate(BaseModel):
     approved: bool | None = None
 
 
-
-
 class ScriptOut(BaseModel):
     id: int
     version: int
@@ -94,8 +92,6 @@ class RenderOut(BaseModel):
     music_name: str | None = None
     render_status: str
     error_message: str | None
-
-
 
 
 class ProjectOut(BaseModel):

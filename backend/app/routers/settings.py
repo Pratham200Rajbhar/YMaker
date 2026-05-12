@@ -19,7 +19,12 @@ def get_settings(db: Session = Depends(get_db)) -> SettingsWithLabel:
         db.commit()
         db.refresh(settings)
     
-    labels = {"ollama":"Ollama (Local)","openai":"OpenAI","openrouter":"OpenRouter","vertex":"Google Vertex AI"}
+    labels = {
+        "ollama": "Ollama (Local)",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "vertex": "Google Vertex AI",
+    }
     data = {
         "id": settings.id,
         "llm_provider": settings.llm_provider,

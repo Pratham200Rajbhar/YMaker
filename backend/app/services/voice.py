@@ -55,10 +55,6 @@ def generate_voiceover(project: Project, voice_name: str, db: Session) -> Render
     
     voiced_scenes = [scene for scene in scenes if scene.voiceover_text.strip()]
     for index, scene in enumerate(voiced_scenes):
-        if not scene.voiceover_text.strip():
-            logger.warning("Scene %d has no voiceover text, skipping", scene.scene_index)
-            continue
-
         try:
             logger.info("Generating TTS for scene %d: %s", scene.scene_index, scene.voiceover_text[:50])
             response = tts_client.synthesize(

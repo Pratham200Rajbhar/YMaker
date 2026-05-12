@@ -138,24 +138,6 @@ KEYWORD_OPTIMIZER_SCHEMA = {
     "required": ["optimized_keyword"],
 }
 
-CLIP_SELECTOR_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "selections": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "scene_id": {"type": "integer"},
-                    "selected_clip_id": {"type": "integer"},
-                },
-                "required": ["scene_id", "selected_clip_id"],
-            },
-        }
-    },
-    "required": ["selections"],
-}
-
 CLIP_SCORER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -176,41 +158,214 @@ CLIP_SCORER_SCHEMA = {
 }
 
 
+def _schema_to_example(schema: dict[str, Any]) -> dict[str, Any]:
+    """Build a minimal example dict from a JSON schema so weak models don't parrot schema keywords."""
+    example: dict[str, Any] = {}
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    for key in required:
+        prop = properties.get(key, {})
+        ptype = prop.get("type")
+        if ptype == "string":
+            desc = prop.get("description", "")
+            example[key] = f"<string value for {key}: {desc}>"
+        elif ptype == "array":
+            item_type = prop.get("items", {}).get("type")
+            if item_type == "object":
+                item_props = prop.get("items", {}).get("properties", {})
+                item_required = prop.get("items", {}).get("required", [])
+                item_example: dict[str, Any] = {}
+                for ik in item_required:
+                    ip = item_props.get(ik, {})
+                    it = ip.get("type")
+                    if it == "string":
+                        item_example[ik] = f"<value for {ik}>"
+                    elif it == "number":
+                        item_example[ik] = 1.0
+                    elif it == "integer":
+                        item_example[ik] = 1
+                    else:
+                        item_example[ik] = None
+                example[key] = [item_example]
+            else:
+                example[key] = ["<example item>"]
+        elif ptype == "number":
+            example[key] = 1.0
+        elif ptype == "integer":
+            example[key] = 1
+        elif ptype == "boolean":
+            example[key] = True
+        else:
+            example[key] = None
+    return example
+
+
 # ---------------------------------------------------------------------------
 # JSON extraction utility
 # ---------------------------------------------------------------------------
 
+def _escape_newlines_in_json(text: str) -> str:
+    """Escape raw newlines that appear inside JSON string values."""
+    result: list[str] = []
+    in_string = False
+    escape = False
+    for char in text:
+        if escape:
+            result.append(char)
+            escape = False
+            continue
+        if char == "\\":
+            result.append(char)
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            continue
+        if in_string and char in ("\n", "\r"):
+            result.append("\\n")
+            continue
+        result.append(char)
+    return "".join(result)
+
+
+def _pre_clean_json(text: str) -> str:
+    """Aggressively pre-clean severely malformed JSON from weak models."""
+    # 1. Fix missing closing quote on key before `:[`  e.g.  "scenes:[  →  "scenes":[
+    text = re.sub(r'"(\w+):\s*\[', r'"\1":[', text)
+
+    # 2. Collapse sequences of multiple colons separated by whitespace
+    # e.g.  "duration_seconds" : : : :  →  "duration_seconds" :
+    text = re.sub(r':(?:\s*:\s*)+', ':', text)
+
+    # 3. Insert placeholder values when a key has a bare colon with no value
+    # before a comma, closing bracket, or closing brace.
+    # e.g.  "duration_seconds" : }  →  "duration_seconds" : 2.5 }
+    text = re.sub(
+        r'"(\w+)"\s*:\s*(?=[,\]\}])',
+        lambda m: f'"{m.group(1)}": 0',
+        text,
+    )
+
+    # 4. Remove trailing commas before } or ]
+    text = re.sub(r',(\s*[}\]])', r'\1', text)
+
+    # 5. Balance unclosed braces and brackets using a stack
+    # (simple counting fails when existing closings are in wrong order)
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in "{[":
+            stack.append(ch)
+        elif ch == "}" and stack and stack[-1] == "{":
+            stack.pop()
+        elif ch == "]" and stack and stack[-1] == "[":
+            stack.pop()
+
+    _closing = {"{": "}", "[": "]"}
+    for opener in reversed(stack):
+        text += _closing[opener]
+
+    return text
+
+
 def _extract_json(text: str | None) -> dict[str, Any]:
-    """Extract and parse the first JSON object found in text."""
+    """Extract and parse the first JSON object found in text with multiple recovery strategies."""
     if text is None:
         return {}
-    
+
     # Remove thinking tags if present (common in OpenRouter reasoning models)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL)
+
     cleaned = text.strip()
-    # Strip markdown code fences if model wrapped output
+
+    # Remove markdown code blocks
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
-    
+
     # Find the first { and the last }
     start = cleaned.find("{")
     end = cleaned.rfind("}")
-    
+
     if start != -1 and end != -1 and end > start:
         cleaned = cleaned[start : end + 1]
-    
+
+    # Pre-clean severe garbage before any parse attempt
+    cleaned = _pre_clean_json(cleaned)
+
+    # Attempt 1: standard parse
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # One last attempt: try to fix common trailing comma issue or small errors
+        pass
+
+    # Attempt 2: fix raw newlines inside strings (common with weak models)
+    try:
+        fixed = _escape_newlines_in_json(cleaned)
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 3: fix trailing commas
+    try:
+        fixed = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 4: try progressively smaller substrings ending at each }
+    brace_positions = [i for i, c in enumerate(cleaned) if c == "}"]
+    for pos in reversed(brace_positions):
         try:
-            # Simple cleanup for trailing commas in arrays/objects
-            cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
-            return json.loads(cleaned)
-        except Exception:
-            logger.error(f"Failed to parse JSON from: {text[:200]}...")
-            return {}
+            candidate = cleaned[start : pos + 1]
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    # Fallback 5: targeted extraction for simple single-string schemas
+    # when weak models return unescaped quotes inside string values
+    if '"optimized_idea"' in cleaned:
+        colon_idx = cleaned.find(':')
+        if colon_idx != -1:
+            open_quote = cleaned.find('"', colon_idx)
+            close_quote = cleaned.rfind('"')
+            if open_quote != -1 and close_quote > open_quote:
+                return {"optimized_idea": cleaned[open_quote + 1 : close_quote]}
+    if '"optimized_keyword"' in cleaned:
+        colon_idx = cleaned.find(':')
+        if colon_idx != -1:
+            open_quote = cleaned.find('"', colon_idx)
+            close_quote = cleaned.rfind('"')
+            if open_quote != -1 and close_quote > open_quote:
+                return {"optimized_keyword": cleaned[open_quote + 1 : close_quote]}
+
+    # Fallback 6: for scenes schema, try to extract the inner array and wrap it
+    scenes_match = re.search(r'"scenes"\s*:\s*(\[.*?\])', cleaned, re.DOTALL)
+    if scenes_match:
+        try:
+            array_text = scenes_match.group(1)
+            # Pre-clean the array text too
+            array_text = _pre_clean_json(array_text)
+            scenes = json.loads(array_text)
+            return {"scenes": scenes}
+        except json.JSONDecodeError:
+            pass
+
+    logger.error("Failed to parse JSON from: %s...", text[:200])
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +415,8 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
 def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any], provider: str = "openai") -> dict[str, Any]:
     """
-    Call OpenAI-compatible chat API with robust retries and JSON mode fallback.
+    Call OpenAI-compatible chat API with one retry only for transient network errors.
+    Empty content or JSON parsing failures raise immediately with a clear message.
     """
     import requests
 
@@ -298,67 +454,79 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         "model": model,
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 4096,  # Ensure enough space for large JSON outputs
+        "max_tokens": 4096,
     }
 
     # Start with JSON mode enabled
     payload["response_format"] = {"type": "json_object"}
 
-    max_retries = 5
-    retry_delay = 5
-    timeout = 120  # 2 minutes
+    max_retries = 2
+    retry_delay = 3
+    timeout = 120
+    json_mode_removed = False
 
     for attempt in range(max_retries):
         try:
-            logger.info(f"AI Attempt {attempt + 1}/{max_retries} for {provider} ({model})")
+            logger.info(f"AI request {attempt + 1}/{max_retries} for {provider} ({model})")
             response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-            
-            # 1. Handle JSON mode support issues (400/422)
-            if response.status_code in (400, 422) and "response_format" in payload:
+
+            # 1. JSON mode unsupported — remove it and retry once immediately
+            if response.status_code in (400, 422) and "response_format" in payload and not json_mode_removed:
                 error_text = response.text.lower()
                 if "response_format" in error_text or "json_object" in error_text or "unsupported" in error_text:
                     logger.warning(f"{provider.capitalize()} doesn't support json_object mode, falling back.")
                     del payload["response_format"]
-                    continue  # Retry immediately without JSON mode
+                    json_mode_removed = True
+                    continue
 
-            # 2. Handle transient errors (5xx) or OpenRouter provider errors
+            # 2. Transient network errors — retry once
             is_provider_error = response.status_code == 400 and "Provider returned error" in response.text
             if response.status_code >= 500 or is_provider_error or response.status_code == 429:
                 if attempt < max_retries - 1:
                     logger.warning(f"Transient error ({response.status_code}) from {provider}, retrying in {retry_delay}s...")
                     time.sleep(retry_delay)
-                    retry_delay *= 1.5  # Slightly slower growth
                     continue
-            
-            # 3. Raise for other status codes
+
+            # 3. Non-OK response — raise immediately with details
             if response.status_code != 200:
                 try:
                     error_data = response.json()
                     error_msg = error_data.get("error", {}).get("message", "Unknown error")
                 except Exception:
-                    error_msg = response.text
-                raise AiServiceError(f"{provider.capitalize()} API error: {error_msg}")
+                    error_msg = response.text[:500]
+                raise AiServiceError(f"{provider.capitalize()} API error ({response.status_code}): {error_msg}")
 
-            # 4. Successful response
+            # 4. Parse response
             data = response.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
             if not content or content == "{}":
-                 if attempt < max_retries - 1:
-                    logger.warning("Empty content from AI, retrying...")
-                    continue
-            
+                raise AiServiceError(f"{provider.capitalize()} returned empty content.")
+
             result = _extract_json(content)
-            if not result and attempt < max_retries - 1:
-                logger.warning(f"Failed to extract JSON from {provider} response, retrying...")
-                continue
-                
+            if not result:
+                raise AiServiceError(
+                    f"{provider.capitalize()} returned content that could not be parsed as JSON. "
+                    f"Raw content (first 500 chars): {content[:500]}"
+                )
+
+            # Reject responses that parrot back the JSON schema definition
+            if result.get("type") == "object" and "properties" in result:
+                actual = {k: v for k, v in result.items() if k not in ("type", "properties", "required", "items")}
+                if actual:
+                    logger.warning("Model returned schema wrapper; extracting actual data keys.")
+                    result = actual
+                else:
+                    raise AiServiceError(
+                        f"{provider.capitalize()} returned a JSON schema definition instead of data. "
+                        f"Try using a different model."
+                    )
+
             return result
 
         except requests.RequestException as exc:
             if attempt < max_retries - 1:
                 logger.warning(f"Connection error: {exc}, retrying in {retry_delay}s...")
                 time.sleep(retry_delay)
-                retry_delay *= 2
                 continue
             raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
 
@@ -442,15 +610,16 @@ def _generate_json(
     provider = ai_settings.get("provider", "ollama").lower()
 
     if provider != "ollama":
-        # For non-Ollama providers, we must reinforce the JSON schema in the system prompt
-        # since we don't pass the schema object natively in the same way.
-        schema_text = json.dumps(schema, indent=2)
+        # Show a simple example instead of the raw JSON schema so weak models
+        # don't parrot back schema keywords like "type", "properties", etc.
+        example = _schema_to_example(schema)
         instruction = (
-            f"\n\nCRITICAL: You MUST return a valid JSON object. "
-            f"Do not include any thinking tags, markdown code blocks, or preamble. "
-            f"The response must be a single JSON object matching this schema:\n{schema_text}"
+            "\n\nCRITICAL: You MUST return a single valid JSON object. "
+            "Do not include any thinking tags, markdown code blocks, or preamble. "
+            "Return ONLY the JSON data, not schema definitions. "
+            "Your response must look exactly like this example (replace placeholder values with real data):\n"
+            f"{json.dumps(example, indent=2)}"
         )
-        # Append to the system prompt
         system_prompt += instruction
 
     messages = [
@@ -599,7 +768,9 @@ def optimize_idea(idea: str) -> str:
         "Expand the idea by adding: 1) A unique high-retention narrative angle, 2) Specific technical details or "
         "concrete examples, and 3) A clear structural framing. "
         "The output must be pure content—dense, professional, and ready for production. "
-        "Do NOT include conversational filler, introductory phrases (like 'Here is...'), or meta-commentary."
+        "Do NOT include conversational filler, introductory phrases (like 'Here is...'), or meta-commentary. "
+        "IMPORTANT: Do not use double quote characters (\\\") inside the optimized_idea text. "
+        "If you need to quote something, use single quotes (')."
     )
     user_prompt = f"Optimize this rough idea:\n{idea}"
     result = _generate_json(system_prompt, user_prompt, IDEA_OPTIMIZER_SCHEMA)
@@ -613,31 +784,13 @@ def optimize_visual_keyword(description: str, current_keyword: str) -> str:
         "The keyword MUST be concrete, visual, and specific. Use a 'Subject + Action + Environment' formula. "
         "Avoid ALL abstract terms: growth, success, concept, idea, connection, future, innovation, happiness. "
         "Focus on tangible elements that search engines can actually index. "
-        "Return ONLY the optimized keyword string."
+        "Return ONLY the optimized keyword string. "
+        "IMPORTANT: Do not use double quote characters (\\\") inside the keyword text. "
+        "If you need to quote something, use single quotes (')."
     )
     user_prompt = f"Scene Description: {description}\nCurrent Keyword: {current_keyword}\n\nOptimize the keyword for a stock video search."
     result = _generate_json(system_prompt, user_prompt, KEYWORD_OPTIMIZER_SCHEMA)
     return result.get("optimized_keyword", current_keyword)
-
-
-def select_best_clips(scenes_data: list[dict]) -> list[dict]:
-    """
-    Pick the best clip for each scene from candidates.
-    Input: list of {scene_id, description, visual_keyword, candidates: [{clip_id, name, source, duration, thumbnail}]}
-    Output: list of {scene_id, selected_clip_id}
-    """
-    system_prompt = (
-        "You are an expert video editor choosing B-roll footage. "
-        "For each scene, choose the ONE clip that best matches the scene description and visual keyword. "
-        "Use the clip name, source tags, and duration to judge relevance. "
-        "Prefer clips whose name/tags semantically match the scene action and setting. "
-        "Prefer clips with duration >= scene implied duration when available. "
-        "Avoid generic clips (sky, abstract, bokeh) when a specific match exists. "
-        "Return ONLY a JSON object with a 'selections' array."
-    )
-    user_prompt = f"Scenes and their clip candidates:\n{json.dumps(scenes_data, indent=2)}"
-    result = _generate_json(system_prompt, user_prompt, CLIP_SELECTOR_SCHEMA)
-    return result.get("selections", [])
 
 
 def score_clips_for_scene(scene_description: str, scene_keyword: str, clips: list[dict]) -> list[dict]:

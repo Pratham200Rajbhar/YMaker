@@ -190,7 +190,7 @@ def _fit_video_duration(video, duration: float, concatenate_videoclips):
     if video.duration >= duration:
         return video.subclipped(0, duration)
     loops = max(1, math.ceil(duration / max(video.duration, 0.01)))
-    return concatenate_videoclips([video] * loops, method="compose").subclipped(0, duration)
+    return concatenate_videoclips([video] * loops, method="chain").subclipped(0, duration)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +266,7 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
     master_duration = max(0.01, float(voiceover_source.duration))
 
     clips = []
+    scene_count = len(project.scenes)
     for scene in sorted(project.scenes, key=lambda item: item.scene_index):
         selected = next(
             (clip for clip in scene.clips if clip.selected and clip.local_path), None
@@ -282,7 +283,7 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
             )
 
         video = VideoFileClip(selected.local_path).without_audio()
-        target_duration = min(max(scene.duration_seconds, 0.1), video.duration)
+        target_duration = min(max(scene.duration_seconds, 0.5), video.duration)
         video = video.subclipped(0, target_duration)
 
         # Scale to fill the target size, then center-crop
@@ -291,19 +292,33 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
         else:
             video = video.resized(width=size[0])
         video = video.cropped(x_center=video.w / 2, y_center=video.h / 2, width=size[0], height=size[1])
-        if clips:
-            try:
-                from moviepy import vfx
-
-                video = video.with_effects([vfx.CrossFadeIn(0.25)])
-            except Exception:
-                logger.warning("Crossfade transition skipped for scene %d", scene.scene_index)
         clips.append(video)
+        logger.info(
+            "Render clip for scene %d: path=%s duration=%.2fs target=%.2fs",
+            scene.scene_index,
+            selected.local_path,
+            video.duration,
+            target_duration,
+        )
 
     if not clips:
         raise RenderingError("No video clips to render.")
 
-    final = concatenate_videoclips(clips, method="compose", padding=-0.25 if len(clips) > 1 else 0)
+    if len(clips) != scene_count:
+        logger.warning(
+            "Project %d has %d scenes but only %d clips were loaded for rendering",
+            project.id,
+            scene_count,
+            len(clips),
+        )
+
+    logger.info(
+        "Concatenating %d clips for project %d (master voiceover duration: %.2fs)",
+        len(clips),
+        project.id,
+        master_duration,
+    )
+    final = concatenate_videoclips(clips, method="chain")
     final = _fit_video_duration(final, master_duration, concatenate_videoclips)
 
     # Generate Whisper subtitles from voiceover
