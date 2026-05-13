@@ -28,6 +28,10 @@ def create_script(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
             raise HTTPException(status_code=502, detail=f"AI generation failed: {exc}") from exc
         raise exc
 
+    # Validate AI returned required fields
+    if not data.get("video_script"):
+        raise HTTPException(status_code=502, detail="AI generation failed: no video_script returned")
+
     current = latest_script(project)
     script = Script(
         project_id=project.id,

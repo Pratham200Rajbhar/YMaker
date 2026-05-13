@@ -205,61 +205,111 @@ def _schema_to_example(schema: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _escape_newlines_in_json(text: str) -> str:
-    """Escape raw newlines that appear inside JSON string values."""
-    result: list[str] = []
+    """
+    Escape raw newlines that appear inside JSON string values.
+    Handles escaped quotes (\\") correctly so they don't toggle string state.
+    """
+    result = []
     in_string = False
-    escape = False
-    for char in text:
-        if escape:
-            result.append(char)
-            escape = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        
+        # Handle escaped characters
+        if char == '\\' and i + 1 < len(text):
+            result.append(text[i:i+2])
+            i += 2
             continue
-        if char == "\\":
-            result.append(char)
-            escape = True
-            continue
+            
+        # Toggle string state on unescaped quotes
         if char == '"':
             in_string = not in_string
             result.append(char)
-            continue
-        if in_string and char in ("\n", "\r"):
-            result.append("\\n")
-            continue
-        result.append(char)
+        # Escape literal newlines if inside a string
+        elif in_string and char == '\n':
+            result.append('\\n')
+        elif in_string and char == '\r':
+            result.append('\\r')
+        else:
+            result.append(char)
+        i += 1
     return "".join(result)
 
 
 def _pre_clean_json(text: str) -> str:
-    """Aggressively pre-clean severely malformed JSON from weak models."""
-    # 1. Fix missing closing quote on key before `:[`  e.g.  "scenes:[  →  "scenes":[
-    text = re.sub(r'"(\w+):\s*\[', r'"\1":[', text)
-
-    # 2. Collapse sequences of multiple colons separated by whitespace
-    # e.g.  "duration_seconds" : : : :  →  "duration_seconds" :
+    """Aggressively pre-clean severely malformed JSON, aware of string boundaries."""
+    # 1. First, handle the most common non-structural fixes that are safe
+    # Collapse multiple colons:  "key" : : : value -> "key" : value
     text = re.sub(r':(?:\s*:\s*)+', ':', text)
+    
+    # 2. Balance unclosed quotes first so string-aware logic works
+    in_string = False
+    escape = False
+    for char in text:
+        if escape:
+            escape = False
+            continue
+        if char == '\\':
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+    if in_string:
+        text += '"'
 
-    # 3. Insert placeholder values when a key has a bare colon with no value
-    # before a comma, closing bracket, or closing brace.
-    # e.g.  "duration_seconds" : }  →  "duration_seconds" : 2.5 }
-    text = re.sub(
-        r'"(\w+)"\s*:\s*(?=[,\]\}])',
-        lambda m: f'"{m.group(1)}": 0',
-        text,
-    )
+    # 3. String-aware cleaning
+    result = []
+    in_string = False
+    escape = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        
+        if escape:
+            result.append(char)
+            escape = False
+            i += 1
+            continue
+        
+        if char == '\\':
+            result.append(char)
+            escape = True
+            i += 1
+            continue
+            
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+            
+        if in_string:
+            result.append(char)
+            i += 1
+            continue
+            
+        # Outside of strings, we can do structural cleanup
+        if char == ',':
+            # Peek ahead to remove trailing commas before } or ] or end of text
+            next_chars = text[i+1:].lstrip()
+            if not next_chars or next_chars[0] in ('}', ']'):
+                i += (len(text[i+1:]) - len(next_chars)) + 1
+                continue
+                
+        result.append(char)
+        i += 1
+    
+    text = "".join(result)
 
-    # 4. Remove trailing commas before } or ]
-    text = re.sub(r',(\s*[}\]])', r'\1', text)
-
-    # 5. Balance unclosed braces and brackets using a stack
-    # (simple counting fails when existing closings are in wrong order)
-    stack: list[str] = []
+    # 4. Balance unclosed braces/brackets using a stack (string-aware)
+    stack = []
     in_string = False
     escape = False
     for ch in text:
         if escape:
             escape = False
             continue
-        if ch == "\\":
+        if ch == '\\':
             escape = True
             continue
         if ch == '"':
@@ -286,85 +336,65 @@ def _extract_json(text: str | None) -> dict[str, Any]:
     if text is None:
         return {}
 
-    # Remove thinking tags if present (common in OpenRouter reasoning models)
+    # 1. Remove thinking tags (OpenRouter reasoning models)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL)
 
     cleaned = text.strip()
 
-    # Remove markdown code blocks
+    # 2. Remove markdown code blocks if the model wrapped the whole thing
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
 
-    # Find the first { and the last }
+    # 3. Find the first '{' to start the JSON object
     start = cleaned.find("{")
-    end = cleaned.rfind("}")
+    if start == -1:
+        logger.error("No opening '{' found in AI response.")
+        return {}
+    
+    # 4. Pre-clean everything from the first {
+    cleaned = _pre_clean_json(cleaned[start:])
 
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
+    # 5. Attempt parsing with progressive fixes
+    attempts = [
+        ("raw", lambda x: x),
+        ("escaped-newlines", lambda x: _escape_newlines_in_json(x)),
+        ("brute-force-braces", lambda x: _pre_clean_json(x + "}")),
+        ("brute-force-array-end", lambda x: _pre_clean_json(x + "]}"))
+    ]
 
-    # Pre-clean severe garbage before any parse attempt
-    cleaned = _pre_clean_json(cleaned)
-
-    # Attempt 1: standard parse
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # Attempt 2: fix raw newlines inside strings (common with weak models)
-    try:
-        fixed = _escape_newlines_in_json(cleaned)
-        return json.loads(fixed)
-    except json.JSONDecodeError:
-        pass
-
-    # Attempt 3: fix trailing commas
-    try:
-        fixed = re.sub(r",(\s*[}\]])", r"\1", cleaned)
-        return json.loads(fixed)
-    except json.JSONDecodeError:
-        pass
-
-    # Attempt 4: try progressively smaller substrings ending at each }
-    brace_positions = [i for i, c in enumerate(cleaned) if c == "}"]
-    for pos in reversed(brace_positions):
+    for name, fix_fn in attempts:
         try:
-            candidate = cleaned[start : pos + 1]
+            candidate = fix_fn(cleaned)
             return json.loads(candidate)
         except json.JSONDecodeError:
             continue
 
-    # Fallback 5: targeted extraction for simple single-string schemas
-    # when weak models return unescaped quotes inside string values
+    # 6. Progressive substring attempt: if it's an array, try to find the last complete object
+    if '"scenes"' in cleaned or '[' in cleaned:
+        # Try to find the last complete object in the array
+        last_obj_end = cleaned.rfind("}")
+        if last_obj_end != -1:
+            try:
+                # Find the start of the scenes array to preserve structure
+                scenes_start = cleaned.find("[")
+                if scenes_start != -1:
+                    partial = cleaned[:last_obj_end + 1] + "]}"
+                    candidate = _pre_clean_json(partial)
+                    return json.loads(candidate)
+            except:
+                pass
+
+    # 7. Targeted Fallbacks for simple schemas
     if '"optimized_idea"' in cleaned:
-        colon_idx = cleaned.find(':')
-        if colon_idx != -1:
-            open_quote = cleaned.find('"', colon_idx)
-            close_quote = cleaned.rfind('"')
-            if open_quote != -1 and close_quote > open_quote:
-                return {"optimized_idea": cleaned[open_quote + 1 : close_quote]}
+        match = re.search(r'"optimized_idea"\s*:\s*"(.*?)"', cleaned, re.DOTALL)
+        if match: return {"optimized_idea": match.group(1)}
+    
     if '"optimized_keyword"' in cleaned:
-        colon_idx = cleaned.find(':')
-        if colon_idx != -1:
-            open_quote = cleaned.find('"', colon_idx)
-            close_quote = cleaned.rfind('"')
-            if open_quote != -1 and close_quote > open_quote:
-                return {"optimized_keyword": cleaned[open_quote + 1 : close_quote]}
+        match = re.search(r'"optimized_keyword"\s*:\s*"(.*?)"', cleaned, re.DOTALL)
+        if match: return {"optimized_keyword": match.group(1)}
 
-    # Fallback 6: for scenes schema, try to extract the inner array and wrap it
-    scenes_match = re.search(r'"scenes"\s*:\s*(\[.*?\])', cleaned, re.DOTALL)
-    if scenes_match:
-        try:
-            array_text = scenes_match.group(1)
-            # Pre-clean the array text too
-            array_text = _pre_clean_json(array_text)
-            scenes = json.loads(array_text)
-            return {"scenes": scenes}
-        except json.JSONDecodeError:
-            pass
-
-    logger.error("Failed to parse JSON from: %s...", text[:200])
+    logger.error(f"Final JSON parsing failure. Snippet: {cleaned[:200]}...")
     return {}
 
 
@@ -380,8 +410,11 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
     base_url = ai_settings.get("ollama_base_url", "http://localhost:11434").rstrip("/")
     url = f"{base_url}/api/chat"
+    model = ai_settings.get("ollama_model") or ""
+    if not model:
+        raise AiServiceError("Ollama model is not configured in settings. Please configure it in the UI settings page.")
     payload = {
-        "model": ai_settings.get("ollama_model", "llama3"),
+        "model": model,
         "messages": messages,
         "format": schema,
         "stream": False,
@@ -391,7 +424,7 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         },
     }
     try:
-        response = requests.post(url, json=payload, timeout=60)
+        response = requests.post(url, json=payload)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise AiServiceError(f"Ollama connection error: {exc}") from exc
@@ -413,7 +446,7 @@ def _ollama_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 # OpenAI backend (and compatible ones like OpenRouter)
 # ---------------------------------------------------------------------------
 
-def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any], provider: str = "openai") -> dict[str, Any]:
+def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict[str, Any], provider: str = "openai", max_tokens: int = 4096) -> dict[str, Any]:
     """
     Call OpenAI-compatible chat API with one retry only for transient network errors.
     Empty content or JSON parsing failures raise immediately with a clear message.
@@ -433,7 +466,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
     elif provider == "nvidia":
         url = "https://integrate.api.nvidia.com/v1/chat/completions"
         api_key = ai_settings.get("nvidia_api_key")
-        model = ai_settings.get("nvidia_model", "meta/llama-3.1-405b-instruct")
+        model = ai_settings.get("nvidia_model") or ""
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -441,7 +474,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
     else:
         url = "https://api.openai.com/v1/chat/completions"
         api_key = ai_settings.get("openai_api_key")
-        model = ai_settings.get("openai_model", "gpt-4o")
+        model = ai_settings.get("openai_model") or ""
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -454,7 +487,7 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         "model": model,
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 4096,
+        "max_tokens": max_tokens,
     }
 
     # Start with JSON mode enabled
@@ -462,13 +495,12 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
     max_retries = 2
     retry_delay = 3
-    timeout = 120
     json_mode_removed = False
 
     for attempt in range(max_retries):
         try:
             logger.info(f"AI request {attempt + 1}/{max_retries} for {provider} ({model})")
-            response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+            response = requests.post(url, json=payload, headers=headers)
 
             # 1. JSON mode unsupported — remove it and retry once immediately
             if response.status_code in (400, 422) and "response_format" in payload and not json_mode_removed:
@@ -484,7 +516,6 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
             if response.status_code >= 500 or is_provider_error or response.status_code == 429:
                 if attempt < max_retries - 1:
                     logger.warning(f"Transient error ({response.status_code}) from {provider}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
                     continue
 
             # 3. Non-OK response — raise immediately with details
@@ -498,15 +529,20 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
 
             # 4. Parse response
             data = response.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-            if not content or content == "{}":
-                raise AiServiceError(f"{provider.capitalize()} returned empty content.")
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            
+            if not content:
+                # Log full response for debugging empty content
+                logger.error(f"{provider.capitalize()} returned empty content. Full response: {data}")
+                raise AiServiceError(f"{provider.capitalize()} returned empty content. This might be due to safety filters or model failure.")
 
             result = _extract_json(content)
             if not result:
+                # Log snippet of failed content
+                snippet = content[:500].replace('\n', ' ')
                 raise AiServiceError(
                     f"{provider.capitalize()} returned content that could not be parsed as JSON. "
-                    f"Raw content (first 500 chars): {content[:500]}"
+                    f"Raw content snippet: {snippet}..."
                 )
 
             # Reject responses that parrot back the JSON schema definition
@@ -526,7 +562,6 @@ def _openai_chat(messages: list[dict], schema: dict[str, Any], ai_settings: dict
         except requests.RequestException as exc:
             if attempt < max_retries - 1:
                 logger.warning(f"Connection error: {exc}, retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
                 continue
             raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
 
@@ -541,6 +576,9 @@ def _gemini_json(prompt: str, schema: dict[str, Any], ai_settings: dict[str, Any
     project_id = ai_settings.get("vertex_project_id")
     if not project_id:
         raise AiServiceError("Vertex Project ID is not configured in settings.")
+    model = ai_settings.get("gemini_model") or ""
+    if not model:
+        raise AiServiceError("Gemini model is not configured in settings. Please configure it in the UI settings page.")
     try:
         from google import genai
         from google.genai import types
@@ -551,7 +589,7 @@ def _gemini_json(prompt: str, schema: dict[str, Any], ai_settings: dict[str, Any
             location=ai_settings.get("vertex_location", "us-central1"),
         )
         response = client.models.generate_content(
-            model=ai_settings.get("gemini_model", "gemini-1.5-pro"),
+            model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -600,10 +638,123 @@ def _get_ai_settings() -> dict[str, Any]:
 # Unified dispatch
 # ---------------------------------------------------------------------------
 
+def _generate_text(system_prompt: str, user_prompt: str) -> str:
+    """Generate plain text from the configured AI provider without JSON schema enforcement."""
+    ai_settings = _get_ai_settings()
+    provider = ai_settings.get("provider", "ollama").lower()
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    if provider == "ollama":
+        import requests
+        base_url = ai_settings.get("ollama_base_url", "http://localhost:11434").rstrip("/")
+        url = f"{base_url}/api/chat"
+        model = ai_settings.get("ollama_model") or ""
+        if not model:
+            raise AiServiceError("Ollama model is not configured in settings. Please configure it in the UI settings page.")
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": 0.7, "num_predict": 4096},
+        }
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("message", {}).get("content", "")
+            if not content:
+                raise AiServiceError("Ollama returned empty content.")
+            return content.strip()
+        except requests.RequestException as exc:
+            raise AiServiceError(f"Ollama connection error: {exc}") from exc
+
+    if provider in ("openai", "openrouter", "nvidia"):
+        if provider == "openrouter":
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            api_key = ai_settings.get("openrouter_api_key")
+            model = ai_settings.get("openrouter_model") or ""
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/MakeVideo",
+                "X-Title": "MakeVideo",
+                "Content-Type": "application/json",
+            }
+        elif provider == "nvidia":
+            url = "https://integrate.api.nvidia.com/v1/chat/completions"
+            api_key = ai_settings.get("nvidia_api_key")
+            model = ai_settings.get("nvidia_model") or ""
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+        else:
+            url = "https://api.openai.com/v1/chat/completions"
+            api_key = ai_settings.get("openai_api_key")
+            model = ai_settings.get("openai_model") or ""
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+
+        if not api_key:
+            raise AiServiceError(f"API key for {provider} is not configured in settings.")
+        if not model:
+            raise AiServiceError(f"Model for {provider} is not configured in settings. Please configure it in the UI settings page.")
+
+        payload = {"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 4096}
+        import requests
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not content:
+                raise AiServiceError(f"{provider.capitalize()} returned empty content.")
+            return content.strip()
+        except requests.RequestException as exc:
+            raise AiServiceError(f"{provider.capitalize()} connection error: {exc}") from exc
+
+    if provider == "vertex":
+        project_id = ai_settings.get("vertex_project_id")
+        if not project_id:
+            raise AiServiceError("Vertex Project ID is not configured in settings.")
+        model = ai_settings.get("gemini_model") or ""
+        if not model:
+            raise AiServiceError("Gemini model is not configured in settings. Please configure it in the UI settings page.")
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client(vertexai=True, project=project_id, location=ai_settings.get("vertex_location", "us-central1"))
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            response = client.models.generate_content(
+                model=model,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(temperature=0.7),
+            )
+            text = (response.text or "").strip()
+            if not text:
+                raise AiServiceError("Gemini returned empty content.")
+            return text
+        except Exception as exc:
+            raise AiServiceError(str(exc)) from exc
+
+    raise AiServiceError(f"Unsupported AI provider: {provider}")
+
+
+def generate_text(system_prompt: str, user_prompt: str) -> str:
+    """Public wrapper for plain text generation."""
+    return _generate_text(system_prompt, user_prompt)
+
+
 def _generate_json(
     system_prompt: str,
     user_prompt: str,
     schema: dict[str, Any],
+    max_tokens: int = 4096
 ) -> dict[str, Any]:
     """Route to the configured model provider."""
     ai_settings = _get_ai_settings()
@@ -627,24 +778,30 @@ def _generate_json(
         {"role": "user", "content": user_prompt},
     ]
 
-    if provider == "ollama":
-        return _ollama_chat(messages, schema, ai_settings)
-    
-    if provider == "openai":
-        return _openai_chat(messages, schema, ai_settings, provider="openai")
-    
-    if provider == "openrouter":
-        return _openai_chat(messages, schema, ai_settings, provider="openrouter")
-    
-    if provider == "nvidia":
-        return _openai_chat(messages, schema, ai_settings, provider="nvidia")
-    
-    if provider == "vertex":
-        # Vertex AI — combine into a single prompt string
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        return _gemini_json(full_prompt, schema, ai_settings)
+    try:
+        if provider == "ollama":
+            return _ollama_chat(messages, schema, ai_settings)
 
-    raise AiServiceError(f"Unsupported AI provider: {provider}")
+        if provider == "openai":
+            return _openai_chat(messages, schema, ai_settings, provider="openai", max_tokens=max_tokens)
+
+        if provider == "openrouter":
+            return _openai_chat(messages, schema, ai_settings, provider="openrouter", max_tokens=max_tokens)
+
+        if provider == "nvidia":
+            return _openai_chat(messages, schema, ai_settings, provider="nvidia", max_tokens=max_tokens)
+
+        if provider == "vertex":
+            # Vertex AI — combine into a single prompt string
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            return _gemini_json(full_prompt, schema, ai_settings)
+
+        raise AiServiceError(f"Unsupported AI provider: {provider}")
+    except AiServiceError:
+        raise
+    except Exception as exc:
+        logger.error("Unexpected error in _generate_json with provider %s: %s", provider, exc)
+        raise AiServiceError(f"AI provider {provider} failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +818,10 @@ def generate_script(idea: str, video_format: str, language: str = "english", vid
     - medium: 3-5 minutes (450-700 words)
     - long: 10+ minutes (1400-1800 words)
     """
+    # Validate input
+    if not idea or len(idea.strip()) < 5:
+        raise AiServiceError("Idea is too short to generate a script")
+
     if video_format == "shorts":
         # Shorts are always short-form, ignore length preset if it's too long
         length_rules = (
@@ -730,22 +891,39 @@ def generate_scenes(script_text: str, video_format: str, language: str = "englis
     - Shorts: 10–25 words
     - Long:   40–60 words
     """
+    # Validate input
+    if not script_text or len(script_text.strip()) < 10:
+        raise AiServiceError("Script text is too short to generate scenes")
+
     if video_format == "shorts":
         count_rule = "Create exactly 4 to 8 scenes."
+    elif video_format == "image_story":
+        count_rule = "Create 10 to 15 scenes."
     else:
         count_rule = "Create 15 to 30 scenes."
 
-    system_prompt = (
-        "You are a YouTube video director. "
-        "Break scripts into concrete, searchable stock-video scenes. "
-        "visual_keyword must always be 3 to 6 words, concrete, and specific: subject plus action plus setting. "
-        "Avoid specific trademarks or copyrighted names (e.g. DOOM, Mario, Cyberpunk) in visual_keyword. "
-        "Instead, use descriptive phrases that capture the vibe: 'retro 16-bit pixel art character jumping', 'futuristic neon city street rainy night', 'gamer hands on mechanical keyboard close up'. "
-        "Never use abstract words in visual_keyword: success, growth, innovation, concept, idea, future, hope, journey, path, vision. "
-        "Adjacent scenes must have different keywords; no two consecutive scenes may use the same keyword or very similar keywords. "
-        "voiceover_text for each scene must map exactly to the corresponding portion of the approved script, word for word. "
-        "Return only the JSON object. No markdown, no explanation."
-    )
+    if video_format == "image_story":
+        system_prompt = (
+            "You are a master storyboard artist and cinematic director. "
+            "Break scripts into evocative, highly descriptive scenes specifically for AI image generation. "
+            "The 'description' field for each scene must be rich with narrative detail, capturing character emotions, "
+            "specific environment features, and atmospheric cues. "
+            "visual_keyword should be a concise summary of the core subject. "
+            "Ensure every scene feels like a distinct beat in a visual story. "
+            "Return only the JSON object. No markdown, no explanation."
+        )
+    else:
+        system_prompt = (
+            "You are a YouTube video director. "
+            "Break scripts into concrete, searchable stock-video scenes. "
+            "visual_keyword must always be 3 to 6 words, concrete, and specific: subject plus action plus setting. "
+            "Avoid specific trademarks or copyrighted names (e.g. DOOM, Mario, Cyberpunk) in visual_keyword. "
+            "Instead, use descriptive phrases that capture the vibe: 'retro 16-bit pixel art character jumping', 'futuristic neon city street rainy night', 'gamer hands on mechanical keyboard close up'. "
+            "Never use abstract words in visual_keyword: success, growth, innovation, concept, idea, future, hope, journey, path, vision. "
+            "Adjacent scenes must have different keywords; no two consecutive scenes may use the same keyword or very similar keywords. "
+            "voiceover_text for each scene must map exactly to the corresponding portion of the approved script, word for word. "
+            "Return only the JSON object. No markdown, no explanation."
+        )
     user_prompt = (
         f"Break this script into scenes.\nFormat: {video_format}\nRules: {count_rule}\n\n"
         f"Script:\n{script_text}\n\n"

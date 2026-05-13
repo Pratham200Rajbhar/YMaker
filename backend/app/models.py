@@ -14,12 +14,14 @@ def _utc_now() -> datetime:
 class VideoFormat(str, Enum):
     shorts = "shorts"
     long = "long"
+    image_story = "image_story"
 
 
 class WorkflowStage(str, Enum):
     script = "script"
     scenes = "scenes"
     clips = "clips"
+    image_upload = "image_upload"
     voiceover = "voiceover"
     render = "render"
 
@@ -29,6 +31,7 @@ class ProjectStatus(str, Enum):
     waiting_review = "waiting_review"
     approved = "approved"
     downloading_clips = "downloading_clips"
+    waiting_images = "waiting_images"
     rendering = "rendering"
     complete = "complete"
     error = "error"
@@ -90,6 +93,11 @@ class Scene(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=5.0)
     voiceover_text: Mapped[str] = mapped_column(Text, default="")
     approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_prompt_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    uploaded_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    character_voice: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="scenes")
     clips: Mapped[list["Clip"]] = relationship(back_populates="scene", cascade="all, delete-orphan")
@@ -144,25 +152,25 @@ class Settings(Base):
 
     # Ollama
     ollama_base_url: Mapped[str] = mapped_column(String(255), default="http://localhost:11434")
-    ollama_model: Mapped[str] = mapped_column(String(100), default="llama3")
+    ollama_model: Mapped[str] = mapped_column(String(100), default="")
 
     # OpenAI
     openai_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    openai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
+    openai_model: Mapped[str] = mapped_column(String(100), default="")
 
     # OpenRouter
     openrouter_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    openrouter_model: Mapped[str] = mapped_column(String(100), default="anthropic/claude-3.5-sonnet")
+    openrouter_model: Mapped[str] = mapped_column(String(100), default="")
 
     # NVIDIA
     nvidia_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    nvidia_model: Mapped[str] = mapped_column(String(100), default="meta/llama-3.1-405b-instruct")
+    nvidia_model: Mapped[str] = mapped_column(String(100), default="")
     nvidia_tts_model: Mapped[str] = mapped_column(String(100), default="877104f7-e885-42b9-8de8-f6e4c6303969")
 
     # Vertex AI
     vertex_project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vertex_location: Mapped[str] = mapped_column(String(100), default="us-central1")
-    gemini_model: Mapped[str] = mapped_column(String(100), default="gemini-1.5-pro")
+    gemini_model: Mapped[str] = mapped_column(String(100), default="")
 
     # Clip provider default
     clip_provider: Mapped[str] = mapped_column(String(20), default="hybrid")

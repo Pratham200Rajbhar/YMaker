@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Project, WorkflowStage
 from ..schemas import ProjectOut, VoiceGenerate
-from ..services.voice import generate_voiceover, VoiceServiceError
+from ..services.voice import generate_voiceover, generate_multivoice_voiceover, VoiceServiceError
+from ..schemas import MultiVoiceGenerate
 from ..utils import project_out
 
 router = APIRouter(prefix="/projects", tags=["voiceover"])
@@ -41,6 +42,26 @@ def approve_voiceover(project_id: int, db: Session = Depends(get_db)) -> Project
     project.current_stage = WorkflowStage.render.value
     db.commit()
     return project_out(project)
+
+@router.post("/{project_id}/voiceover/generate-multivoice", response_model=ProjectOut)
+def generate_project_multivoice(
+    project_id: int,
+    req: MultiVoiceGenerate,
+    db: Session = Depends(get_db)
+) -> ProjectOut:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        generate_multivoice_voiceover(project, req.scene_voices, req.default_voice, db)
+        return project_out(project)
+    except VoiceServiceError as exc:
+        logger.error("Multi-voice generation failed: %s", str(exc))
+        project.status = "error"
+        db.commit()
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 @router.get("/{project_id}/voices")
 def list_voices():

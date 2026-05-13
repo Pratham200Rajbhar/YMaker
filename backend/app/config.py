@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # NVIDIA NIM
     nvidia_api_key: str | None = None
-    nvidia_model: str = "meta/llama-3.1-405b-instruct"
+    nvidia_model: str = ""
     nvidia_tts_model: str = "877104f7-e885-42b9-8de8-f6e4c6303969"
 
     # LLM Provider Selection
@@ -44,20 +44,20 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3"
+    ollama_model: str = ""
 
     # OpenAI
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4o"
+    openai_model: str = ""
 
     # OpenRouter
     openrouter_api_key: str | None = None
-    openrouter_model: str = "anthropic/claude-3.5-sonnet"
+    openrouter_model: str = ""
 
     # Vertex AI (Gemini)
     vertex_project_id: str | None = None
     vertex_location: str = "us-central1"
-    gemini_model: str = "gemini-1.5-pro"
+    gemini_model: str = ""
 
     # FFMPEG
     ffmpeg_binary: str = "ffmpeg"
@@ -78,6 +78,12 @@ class Settings(BaseSettings):
                 f"Invalid clip_provider: {provider!r}. "
                 f"Must be one of: {', '.join(sorted(valid_providers))}"
             )
+
+        # Validate frontend_origin to prevent CORS misconfiguration
+        if self.frontend_origin:
+            # Basic validation to prevent obviously malformed origins
+            if not self.frontend_origin.startswith(("http://", "https://")):
+                raise ValueError(f"Invalid frontend_origin: must start with http:// or https://")
 
 
 settings = Settings()

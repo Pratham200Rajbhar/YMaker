@@ -13,7 +13,10 @@ def titles_to_json(titles: list[str]) -> str:
 def titles_from_json(raw: str | None) -> list[str]:
     if not raw:
         return []
-    value = json.loads(raw)
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
     if not isinstance(value, list):
         raise ValueError(f"Expected list of titles, got {type(value).__name__}")
     return value
@@ -36,6 +39,8 @@ def list_from_json(raw: str | None) -> list[str]:
 
 
 def latest_script(project: Project) -> Script | None:
+    if not project.scripts:
+        return None
     return max(project.scripts, key=lambda item: item.version, default=None)
 
 
@@ -43,9 +48,13 @@ def public_path(path: str | None) -> str | None:
     if not path:
         return None
     try:
-        return "/media/" + str(Path(path).resolve().relative_to(STORAGE_DIR.resolve()))
+        resolved_path = Path(path).resolve()
+        # Validate path is within storage directory
+        resolved_path.relative_to(STORAGE_DIR.resolve())
+        return "/media/" + str(resolved_path.relative_to(STORAGE_DIR.resolve()))
     except ValueError:
-        return path
+        # Path is outside storage directory - return None for security
+        return None
 
 
 def clip_out(clip: Clip) -> ClipOut:
@@ -94,6 +103,11 @@ def scene_out(scene: Scene) -> SceneOut:
         voiceover_text=scene.voiceover_text,
         approved=scene.approved,
         clips=[clip_out(clip) for clip in scene.clips],
+        image_prompt=scene.image_prompt,
+        image_prompt_approved=scene.image_prompt_approved,
+        uploaded_image_path=public_path(scene.uploaded_image_path),
+        image_ready=scene.image_ready,
+        character_voice=scene.character_voice,
     )
 
 

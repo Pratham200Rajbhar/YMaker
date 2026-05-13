@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Project, ProjectStatus, WorkflowStage
 from ..schemas import ProjectOut
-from ..services.rendering import render_project
+from ..services.rendering import render_project, render_image_story_video
 from ..utils import project_out
 
 router = APIRouter(prefix="/projects/{project_id}/render", tags=["render"])
@@ -42,11 +42,36 @@ def start(project_id: int, background_tasks: BackgroundTasks, db: Session = Depe
             detail="Cannot render: " + "; ".join(missing_clips)
         )
 
+    # Validate project has scenes
+    if not project.scenes:
+        raise HTTPException(status_code=400, detail="Project has no scenes to render")
+
     project.render.render_status = "queued"
     project.render.error_message = None
     project.status = ProjectStatus.rendering.value
     db.commit()
     background_tasks.add_task(render_project, project.id)
+    db.refresh(project)
+    return project_out(project)
+
+
+@router.post("/start-image-story", response_model=ProjectOut)
+def start_image_story(project_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> ProjectOut:
+    project = _project(db, project_id)
+    if project.video_format != "image_story":
+        raise HTTPException(status_code=400, detail="This endpoint is only for image_story projects")
+
+    missing = [f"Scene {s.scene_index}" for s in project.scenes if not s.image_ready]
+    if missing:
+        raise HTTPException(status_code=400, detail="Not all scenes have images ready: " + ", ".join(missing))
+
+    if not project.render or not project.render.voiceover_approved:
+        raise HTTPException(status_code=400, detail="Voiceover must be generated and approved before rendering.")
+
+    project.status = ProjectStatus.rendering.value
+    project.render.render_status = "rendering"
+    db.commit()
+    background_tasks.add_task(render_image_story_video, project.id)
     db.refresh(project)
     return project_out(project)
 

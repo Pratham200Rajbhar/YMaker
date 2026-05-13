@@ -1,8 +1,8 @@
 import { Check } from "lucide-react";
-import type { WorkflowStage } from "@/lib/types";
+import type { WorkflowStage, VideoFormat } from "@/lib/types";
 import { motion } from "framer-motion";
 
-const steps: { id: WorkflowStage; label: string; description: string }[] = [
+const DEFAULT_STEPS: { id: WorkflowStage; label: string; description: string }[] = [
   { id: "script", label: "Script", description: "AI script generation" },
   { id: "scenes", label: "Scenes", description: "Scene breakdown" },
   { id: "clips", label: "Clips", description: "Stock video selection" },
@@ -10,7 +10,24 @@ const steps: { id: WorkflowStage; label: string; description: string }[] = [
   { id: "render", label: "Final Video", description: "MP4 Rendering" },
 ];
 
-export function StepSidebar({ active }: { active: WorkflowStage }) {
+const IMAGE_STORY_STEPS: { id: WorkflowStage; label: string; description: string }[] = [
+  { id: "script", label: "Script", description: "AI script generation" },
+  { id: "scenes", label: "Scenes", description: "Scene breakdown" },
+  { id: "image_upload", label: "Image Prompts & Upload", description: "AI image prompts & upload" },
+  { id: "voiceover", label: "Voiceover", description: "NVIDIA Magpie TTS" },
+  { id: "render", label: "Final Video", description: "MP4 Rendering" },
+];
+
+export function StepSidebar({ 
+  active, 
+  video_format = "shorts",
+  onStepClick
+}: { 
+  active: WorkflowStage; 
+  video_format?: VideoFormat;
+  onStepClick?: (stage: WorkflowStage) => void;
+}) {
+  const steps = video_format === "image_story" ? IMAGE_STORY_STEPS : DEFAULT_STEPS;
   const activeIndex = steps.findIndex((step) => step.id === active);
 
   return (
@@ -40,23 +57,27 @@ export function StepSidebar({ active }: { active: WorkflowStage }) {
         {steps.map((step, index) => {
           const done = index < activeIndex;
           const current = index === activeIndex;
+          const clickable = done || current; // Can click past or current to re-activate
 
           return (
             <div
               key={step.id}
+              onClick={() => clickable && onStepClick?.(step.id)}
               className={`relative z-10 flex items-start gap-4 rounded-xl px-3 py-3 transition-all duration-300 ${
                 current
                   ? "bg-forge-red/10 ring-1 ring-forge-red/20 shadow-glow-red/5"
-                  : "hover:bg-white/[0.02]"
+                  : clickable 
+                    ? "hover:bg-white/[0.05] cursor-pointer group" 
+                    : "opacity-40"
               }`}
             >
               <div className={`mt-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border transition-all duration-700 ${
-                done ? "border-emerald-500/40 bg-emerald-500/5" : 
+                done ? "border-emerald-500/40 bg-emerald-500/5 group-hover:border-emerald-400" : 
                 current ? "border-forge-red bg-forge-bg shadow-[0_0_12px_rgba(244,63,94,0.25)]" : 
                 "border-white/5 bg-forge-bg"
               }`}>
                 {done ? (
-                  <Check className="h-2.5 w-2.5 text-emerald-400" />
+                  <Check className="h-2.5 w-2.5 text-emerald-400 group-hover:scale-110 transition-transform" />
                 ) : (
                   <div className={`h-1 w-1 rounded-full transition-all duration-500 ${
                     current ? "bg-forge-red scale-125 shadow-[0_0_10px_rgba(244,63,94,0.6)]" : "bg-zinc-800"
@@ -66,12 +87,12 @@ export function StepSidebar({ active }: { active: WorkflowStage }) {
               
               <div className="flex-1 overflow-hidden">
                 <div className={`text-xs font-bold leading-tight tracking-tight transition-colors duration-300 ${
-                  current ? "text-white" : done ? "text-zinc-400" : "text-zinc-500"
+                  current ? "text-white" : done ? "text-zinc-400 group-hover:text-zinc-200" : "text-zinc-500"
                 }`}>
                   {step.label}
                 </div>
                 <div className={`mt-0.5 truncate text-[10px] font-medium transition-colors duration-300 ${
-                  current ? "text-zinc-400" : "text-zinc-600"
+                  current ? "text-zinc-400" : "text-zinc-600 group-hover:text-zinc-400"
                 }`}>
                   {step.description}
                 </div>

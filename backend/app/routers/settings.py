@@ -53,7 +53,13 @@ def test_llm_connection(db: Session = Depends(get_db)) -> dict:
     provider = ai_settings.get("provider", "ollama")
     test_schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
     try:
-        result = _generate_json("Reply with valid JSON only.", 'Respond with: {"ok": true}', test_schema)
+        # Use few tokens for connection testing
+        result = _generate_json(
+            "Reply with valid JSON only.", 
+            'Respond with: {"ok": true}', 
+            test_schema,
+            max_tokens=20
+        )
         return {"provider": provider, "success": bool(result.get("ok")), "error": None}
     except Exception as exc:
         return {"provider": provider, "success": False, "error": str(exc)}
@@ -65,11 +71,14 @@ def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> S
     if not settings:
         settings = Settings()
         db.add(settings)
-    
+
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
+        # Never allow empty API keys to overwrite existing ones
+        if key.endswith("_api_key") and value == "":
+            continue
         setattr(settings, key, value)
-    
+
     db.commit()
     db.refresh(settings)
     return settings

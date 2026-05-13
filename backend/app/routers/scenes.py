@@ -24,6 +24,10 @@ def create_scenes(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     if not script or not script.approved:
         raise HTTPException(status_code=409, detail="Approve the script before generating scenes")
 
+    # Validate script has content
+    if not script.video_script or len(script.video_script.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Script is too short to generate scenes")
+
     # Use only hook + body — never include CTA in the voiceover source
     script_text = script.video_script
 
@@ -34,25 +38,40 @@ def create_scenes(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
             raise HTTPException(status_code=502, detail=f"Scene generation failed: {exc}") from exc
         raise exc
 
-    project.scenes.clear()
-    for item in scene_items:
-        duration = float(item["duration_seconds"])
-        if duration < 0.5:
-            duration = 0.5
-        project.scenes.append(
-            Scene(
-                scene_index=item["scene_index"],
-                description=item["description"],
-                visual_keyword=item["visual_keyword"],
-                duration_seconds=duration,
-                voiceover_text=item["voiceover_text"],
+    if not scene_items:
+        raise HTTPException(status_code=502, detail="AI returned no scenes. Please try again.")
+
+    # Store existing scenes in case of rollback
+    existing_scenes = list(project.scenes)
+    
+    try:
+        project.scenes.clear()
+        for item in scene_items:
+            duration = float(item["duration_seconds"])
+            if duration < 0.5:
+                duration = 0.5
+            project.scenes.append(
+                Scene(
+                    scene_index=item["scene_index"],
+                    description=item["description"],
+                    visual_keyword=item["visual_keyword"],
+                    duration_seconds=duration,
+                    voiceover_text=item["voiceover_text"],
+                )
             )
-        )
-    project.current_stage = WorkflowStage.scenes.value
-    project.status = ProjectStatus.waiting_review.value
-    db.commit()
-    db.refresh(project)
-    return project_out(project)
+        project.current_stage = WorkflowStage.scenes.value
+        project.status = ProjectStatus.waiting_review.value
+        db.commit()
+        db.refresh(project)
+        return project_out(project)
+    except Exception as exc:
+        # Rollback to existing scenes on error
+        db.rollback()
+        project.scenes.clear()
+        for scene in existing_scenes:
+            project.scenes.append(scene)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to save scenes: {exc}") from exc
 
 
 @router.put("/{scene_id}", response_model=ProjectOut)
@@ -77,8 +96,12 @@ def approve_scenes(project_id: int, db: Session = Depends(get_db)) -> ProjectOut
         raise HTTPException(status_code=400, detail="Generate scenes first")
     for scene in project.scenes:
         scene.approved = True
-    project.current_stage = WorkflowStage.clips.value
-    project.status = ProjectStatus.approved.value
+    if project.video_format == "image_story":
+        project.current_stage = WorkflowStage.image_upload.value
+        project.status = ProjectStatus.waiting_images.value
+    else:
+        project.current_stage = WorkflowStage.clips.value
+        project.status = ProjectStatus.approved.value
     db.commit()
     db.refresh(project)
     return project_out(project)

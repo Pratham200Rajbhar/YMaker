@@ -1,6 +1,6 @@
-export type VideoFormat = "shorts" | "long";
+export type VideoFormat = "shorts" | "long" | "image_story";
 export type VideoLength = "auto" | "short" | "medium" | "long";
-export type WorkflowStage = "script" | "scenes" | "clips" | "voiceover" | "render";
+export type WorkflowStage = "script" | "scenes" | "clips" | "image_upload" | "voiceover" | "render";
 
 export type Script = {
   id: number;
@@ -41,6 +41,24 @@ export type Scene = {
   voiceover_text: string;
   approved: boolean;
   clips: Clip[];
+  image_prompt?: string | null;
+  image_prompt_approved?: boolean;
+  uploaded_image_path?: string | null;
+  image_ready?: boolean;
+  character_voice?: string | null;
+};
+
+export type ImageProgress = {
+  total_scenes: number;
+  images_ready: number;
+  all_ready: boolean;
+  scenes: Array<{
+    scene_id: number;
+    scene_index: number;
+    image_ready: boolean;
+    image_prompt: string | null;
+    image_prompt_approved: boolean;
+  }>;
 };
 
 export type Render = {

@@ -9,8 +9,11 @@ Design:
 
 import logging
 import os
+import re
+import socket
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlparse
 
 import requests
 
@@ -24,6 +27,62 @@ logger = logging.getLogger(__name__)
 
 class ClipServiceError(RuntimeError):
     pass
+
+
+# Private IP ranges to block for SSRF protection
+PRIVATE_IP_PATTERNS = [
+    r'^127\.',  # Loopback
+    r'^10\.',   # Private Class A
+    r'^172\.(1[6-9]|2[0-9]|3[0-1])\.',  # Private Class B
+    r'^192\.168\.',  # Private Class C
+    r'^169\.254\.',  # Link-local
+    r'^::1$',  # IPv6 loopback
+    r'^fc00:',  # IPv6 private
+    r'^fe80:',  # IPv6 link-local
+]
+
+
+def _is_safe_url(url: str) -> bool:
+    """
+    Validate URL to prevent SSRF attacks.
+    Blocks internal/private IPs and ensures proper scheme.
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Must be http or https
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        
+        # Block if no hostname
+        if not parsed.hostname:
+            return False
+        
+        # Block localhost variants
+        hostname_lower = parsed.hostname.lower()
+        if hostname_lower in ('localhost', 'localhost.localdomain'):
+            return False
+        
+        # Block private IP ranges
+        for pattern in PRIVATE_IP_PATTERNS:
+            if re.match(pattern, hostname_lower):
+                return False
+        
+        # Block domain that resolves to private IP
+        try:
+            ip = socket.gethostbyname(parsed.hostname)
+            for pattern in PRIVATE_IP_PATTERNS:
+                if re.match(pattern, ip):
+                    logger.warning("URL hostname resolves to private IP: %s -> %s", parsed.hostname, ip)
+                    return False
+        except socket.gaierror:
+            # DNS resolution failed - allow but will fail later
+            pass
+        
+        return True
+    except Exception as exc:
+        logger.error("URL validation failed for %s: %s", url, exc)
+        return False
 
 
 VIDEO_CONTENT_TYPES = {
@@ -88,8 +147,7 @@ def _fetch_pexels_clips(keyword: str, project: Project, per_page: int = 6) -> li
                 "orientation": orientation,
                 "per_page": per_page,
             },
-            headers={"Authorization": settings.pexels_api_key},
-            timeout=25,
+            headers={"Authorization": settings.pexels_api_key}
         )
         response.raise_for_status()
     except requests.HTTPError as exc:
@@ -121,8 +179,7 @@ def _fetch_coverr_clips(keyword: str, project: Project, per_page: int = 6) -> li
                 "page": 1,
                 "per_page": per_page,
             },
-            headers={"User-Agent": "YMaker/1.0"},
-            timeout=25,
+            headers={"User-Agent": "YMaker/1.0"}
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -172,8 +229,7 @@ def _fetch_mixkit_clips(keyword: str, project: Project, per_page: int = 6) -> li
         response = requests.get(
             "https://mixkit.co/free-stock-video/",
             params={"q": keyword},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; YMaker/1.0)"},
-            timeout=25,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; YMaker/1.0)"}
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -263,8 +319,7 @@ def _fetch_pixabay_clips(keyword: str, project: Project, per_page: int = 6) -> l
                 "q": keyword,
                 "orientation": orientation,
                 "per_page": per_page,
-            },
-            timeout=25,
+            }
         )
         response.raise_for_status()
     except requests.HTTPError as exc:
@@ -288,8 +343,7 @@ def _refresh_pexels_clip(clip: Clip) -> dict | None:
     try:
         response = requests.get(
             f"https://api.pexels.com/videos/videos/{clip.source_id}",
-            headers={"Authorization": settings.pexels_api_key},
-            timeout=20,
+            headers={"Authorization": settings.pexels_api_key}
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -304,8 +358,7 @@ def _refresh_pixabay_clip(clip: Clip) -> dict | None:
     try:
         response = requests.get(
             "https://pixabay.com/api/videos/",
-            params={"key": settings.pixabay_api_key, "id": clip.source_id},
-            timeout=20,
+            params={"key": settings.pixabay_api_key, "id": clip.source_id}
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -364,22 +417,30 @@ def fetch_clip_options(scene: Scene, project: Project, per_page: int = 6) -> lis
     """Search stock providers for clips matching the scene keyword, then AI-rank them."""
     provider = project.clip_provider or settings.clip_provider
 
+    # Validate visual_keyword to prevent injection
+    if not scene.visual_keyword or len(scene.visual_keyword.strip()) < 2:
+        logger.warning("Scene %d has invalid visual_keyword, skipping clip fetch", scene.scene_index)
+        return []
+
+    # Sanitize keyword to prevent potential issues
+    keyword = scene.visual_keyword.strip()[:200]  # Limit length
+
     pexels_items: list[dict] = []
     pixabay_items: list[dict] = []
     coverr_items: list[dict] = []
     mixkit_items: list[dict] = []
 
     if provider in ("pexels", "hybrid"):
-        pexels_items = _fetch_pexels_clips(scene.visual_keyword, project, min(per_page, 6))
+        pexels_items = _fetch_pexels_clips(keyword, project, min(per_page, 6))
 
     if provider in ("pixabay", "hybrid"):
-        pixabay_items = _fetch_pixabay_clips(scene.visual_keyword, project, 6)
+        pixabay_items = _fetch_pixabay_clips(keyword, project, 6)
 
     if provider in ("coverr", "hybrid", "free"):
-        coverr_items = _fetch_coverr_clips(scene.visual_keyword, project, 6)
+        coverr_items = _fetch_coverr_clips(keyword, project, 6)
 
     if provider in ("mixkit", "hybrid", "free"):
-        mixkit_items = _fetch_mixkit_clips(scene.visual_keyword, project, 6)
+        mixkit_items = _fetch_mixkit_clips(keyword, project, 6)
 
     # Merge: interleave sources for diversity, deduplicate by url
     seen_urls: set[str] = set()
@@ -393,9 +454,11 @@ def fetch_clip_options(scene: Scene, project: Project, per_page: int = 6) -> lis
 
     # Fallback with keyword variants if nothing found
     if not items:
-        logger.warning("No clips found for keyword '%s' (scene %d)", scene.visual_keyword, scene.scene_index)
-        keyword_variants = _generate_keyword_variants(scene.description, scene.visual_keyword)
+        logger.warning("No clips found for keyword '%s' (scene %d)", keyword, scene.scene_index)
+        keyword_variants = _generate_keyword_variants(scene.description, keyword)
         for fallback_keyword in keyword_variants:
+            # Sanitize fallback keyword as well
+            fallback_keyword = fallback_keyword.strip()[:200]
             logger.info("Retrying with fallback keyword '%s' for scene %d", fallback_keyword, scene.scene_index)
             if provider in ("pexels", "hybrid"):
                 items += _fetch_pexels_clips(fallback_keyword, project, 4)
@@ -434,11 +497,15 @@ def fetch_clip_options(scene: Scene, project: Project, per_page: int = 6) -> lis
 
 def download_selected_clip(project_id: int, clip: Clip) -> str:
     """
-    Download the selected clip from Pexels to local project storage.
+    Download the selected clip from provider to local project storage.
 
     Validates that the response is actually a video file before writing,
     preventing silent corruption where an HTML error page gets saved as .mp4.
     """
+    # Validate URL to prevent SSRF attacks
+    if not clip.url or not _is_safe_url(clip.url):
+        raise ClipServiceError(f"Invalid or unsafe clip URL: {clip.url}")
+
     storage = ProjectStorage(project_id)
     target = storage.get_clip_path(clip.id)
 
@@ -448,7 +515,7 @@ def download_selected_clip(project_id: int, clip: Clip) -> str:
         if attempt:
             _refresh_clip_url(clip)
         try:
-            response = requests.get(clip.url, timeout=90, stream=True)
+            response = requests.get(clip.url, stream=True)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
             if content_type and content_type not in VIDEO_CONTENT_TYPES and not content_type.startswith("video/"):

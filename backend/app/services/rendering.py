@@ -25,6 +25,8 @@ from ..storage import ProjectStorage
 
 logger = logging.getLogger(__name__)
 
+IMAGE_STORY_RESOLUTION = (1920, 1080)
+
 
 # Module-level Whisper model cache — loaded once, reused across renders
 _whisper_model_cache: dict[str, Any] = {}
@@ -33,11 +35,19 @@ _whisper_model_cache: dict[str, Any] = {}
 def _get_whisper_model(model_name: str = "base") -> Any:
     """Load Whisper model once and cache it in memory."""
     if model_name not in _whisper_model_cache:
-        import whisper
+        try:
+            import whisper
+        except ImportError as exc:
+            raise ImportError("Whisper is not installed. Run: pip install openai-whisper") from exc
+
         device = "cuda" if _cuda_available() else "cpu"
         logger.info("Loading Whisper model '%s' on %s (first time)...", model_name, device)
-        _whisper_model_cache[model_name] = whisper.load_model(model_name, device=device)
-        logger.info("Whisper model '%s' loaded and cached.", model_name)
+        try:
+            _whisper_model_cache[model_name] = whisper.load_model(model_name, device=device)
+            logger.info("Whisper model '%s' loaded and cached.", model_name)
+        except Exception as exc:
+            logger.error("Failed to load Whisper model '%s': %s", model_name, exc)
+            raise RenderingError(f"Failed to load Whisper model: {exc}") from exc
     return _whisper_model_cache[model_name]
 
 
@@ -70,7 +80,13 @@ def _generate_whisper_subtitles(audio_path: str, target: Path, language: str = "
     """Generate subtitles and return per-word timings for karaoke captions."""
     model = _get_whisper_model("base")
     language_code = {"hindi": "hi", "english": "en"}.get(language.lower(), language)
-    result = model.transcribe(audio_path, word_timestamps=True, language=language_code)
+
+    try:
+        result = model.transcribe(audio_path, word_timestamps=True, language=language_code)
+    except Exception as exc:
+        logger.error("Whisper transcription failed for %s: %s", audio_path, exc)
+        raise RenderingError(f"Subtitle generation failed: {exc}") from exc
+
     lines = []
     words = []
     for idx, segment in enumerate(result.get("segments", []), start=1):
@@ -102,8 +118,14 @@ def _normalize_audio_loudness(audio_path: str, target_lufs: float = -14.0) -> No
         data, rate = sf.read(audio_path)
         meter = pyln.Meter(rate)
         loudness = meter.integrated_loudness(data)
+        # Check if loudness is valid
+        if loudness <= -70.0:  # Silence or invalid
+            logger.warning("Audio has invalid loudness (%f), skipping normalization", loudness)
+            return
         normalized = pyln.normalize.loudness(data, loudness, target_lufs)
         sf.write(audio_path, normalized, rate)
+    except ImportError:
+        logger.warning("pyloudnorm not installed, skipping audio normalization")
     except Exception as exc:
         logger.warning("Audio loudness normalization skipped for %s: %s", audio_path, exc)
 
@@ -207,6 +229,14 @@ def _burn_subtitles_ffmpeg(
     Burn SRT subtitles into video using FFmpeg subtitles filter.
     Far faster than MoviePy TextClip — no per-word Python objects.
     """
+    # Validate input file exists
+    if not input_path.exists():
+        raise RenderingError(f"Input video file not found: {input_path}")
+    
+    # Validate subtitle file exists
+    if not subtitle_path.exists():
+        raise RenderingError(f"Subtitle file not found: {subtitle_path}")
+    
     font_size = 20 if video_format == "long" else 26
     margin_v = 60 if video_format == "shorts" else 40
 
@@ -238,16 +268,20 @@ def _burn_subtitles_ffmpeg(
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            logger.error("FFmpeg subtitle burn failed: %s", result.stderr[-500:])
-            shutil.copy2(input_path, output_path)
+            error_msg = result.stderr[-500:] if result.stderr else "Unknown error"
+            logger.error("FFmpeg subtitle burn failed: %s", error_msg)
+            raise RenderingError(f"FFmpeg subtitle burn failed: {error_msg}")
     except subprocess.TimeoutExpired:
-        logger.error("FFmpeg subtitle burn timed out")
-        shutil.copy2(input_path, output_path)
+        logger.error("FFmpeg subtitle burn timed out after 600 seconds")
+        raise RenderingError("FFmpeg subtitle burn timed out")
     except FileNotFoundError:
         logger.error("FFmpeg not found at '%s'", settings.ffmpeg_binary)
-        shutil.copy2(input_path, output_path)
+        raise RenderingError(f"FFmpeg not found at '{settings.ffmpeg_binary}'. Please install FFmpeg.")
+    except Exception as exc:
+        logger.error("Unexpected error during FFmpeg subtitle burn: %s", exc)
+        raise RenderingError(f"FFmpeg subtitle burn error: {exc}") from exc
 
 
 def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
@@ -377,13 +411,18 @@ def _render_with_moviepy(project: Project, render: Render, db: Session) -> None:
 
     # Burn subtitles via FFmpeg (10x faster than TextClip overlays)
     if project.subtitles_enabled and render.subtitle_path and Path(render.subtitle_path).exists():
-        _burn_subtitles_ffmpeg(
-            input_path=raw_output,
-            subtitle_path=Path(render.subtitle_path),
-            output_path=output,
-            video_format=project.video_format,
-        )
-        raw_output.unlink(missing_ok=True)
+        try:
+            _burn_subtitles_ffmpeg(
+                input_path=raw_output,
+                subtitle_path=Path(render.subtitle_path),
+                output_path=output,
+                video_format=project.video_format,
+            )
+            raw_output.unlink(missing_ok=True)
+        except RenderingError as exc:
+            logger.error("Subtitle burn failed, using raw video without subtitles: %s", exc)
+            raw_output.rename(output)
+            render.subtitle_path = None  # Clear subtitle path since burn failed
     else:
         raw_output.rename(output)
 
@@ -422,6 +461,199 @@ def render_project(project_id: int) -> None:
             logger.info("Project %d rendered successfully", project_id)
         except Exception as exc:
             logger.exception("Render failed for project %d", project_id)
+            render.render_status = "error"
+            render.error_message = str(exc)
+            project.status = ProjectStatus.error.value
+
+        db.commit()
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Image story rendering logic
+# ---------------------------------------------------------------------------
+
+def _scene_time_boundaries(scenes, voiceover_path: str) -> list[tuple[Any, float, float]]:
+    """Compute start/end times for each scene based on voiceover audio duration."""
+    import soundfile as sf
+    data, sample_rate = sf.read(voiceover_path)
+    total_duration = len(data) / sample_rate
+
+    # Estimate each scene's proportion based on voiceover text word count
+    word_counts = [len(s.voiceover_text.split()) for s in scenes]
+    total_words = max(sum(word_counts), 1)
+    proportions = [wc / total_words for wc in word_counts]
+
+    # Allocate total duration minus silence gaps (150ms between scenes)
+    gap = 0.150
+    available_duration = total_duration - gap * max(len(scenes) - 1, 0)
+    if available_duration <= 0:
+        available_duration = total_duration
+
+    boundaries = []
+    current_time = 0.0
+    for i, scene in enumerate(scenes):
+        scene_duration = proportions[i] * available_duration
+        end_time = current_time + scene_duration
+        boundaries.append((scene, current_time, end_time))
+        current_time = end_time + gap
+    return boundaries
+
+
+def _build_ken_burns_clip(image_path: str, duration: float, size: tuple[int, int]):
+    """Build an ImageClip with gentle Ken Burns zoom + center crop to target size."""
+    from moviepy import ImageClip, VideoClip
+    import numpy as np
+
+    clip = ImageClip(image_path).with_duration(duration)
+
+    # Initial scale to cover target resolution
+    w_orig, h_orig = clip.size
+    ratio = max(size[0] / w_orig, size[1] / h_orig)
+    clip = clip.resized(ratio)
+
+    def scale(t):
+        return 1.0 + 0.10 * (t / max(duration, 0.01))
+
+    # Dynamic zoom (MoviePy 2.x Resize effect supports functions)
+    clip = clip.resized(lambda t: scale(t))
+
+    # Dynamic center crop via transform (Crop effect doesn't support functions in v2)
+    def crop_frame(get_frame, t):
+        frame = get_frame(t)
+        h, w = frame.shape[:2]
+        x1 = max(0, (w - size[0]) // 2)
+        y1 = max(0, (h - size[1]) // 2)
+        return frame[y1 : y1 + size[1], x1 : x1 + size[0]]
+
+    clip = clip.transform(crop_frame, keep_duration=True)
+    clip.size = size  # Ensure the clip size is explicitly set for composition
+    return clip
+
+
+def render_image_story_video(project_id: int) -> None:
+    """Background task for image_story projects."""
+    db = SessionLocal()
+    try:
+        from moviepy import (
+            AudioFileClip,
+            CompositeAudioClip,
+            concatenate_videoclips,
+        )
+
+        project = db.get(Project, project_id)
+        if not project or not project.render:
+            logger.error("render_image_story_video called for missing project/render id=%d", project_id)
+            return
+
+        render = project.render
+        render.render_status = "rendering"
+        render.error_message = None
+        project.status = ProjectStatus.rendering.value
+        db.commit()
+
+        try:
+            if project.video_format != "image_story":
+                raise RenderingError("Project is not image_story format")
+
+            scenes = sorted(project.scenes, key=lambda s: s.scene_index)
+            missing = []
+            for scene in scenes:
+                if not scene.uploaded_image_path:
+                    missing.append(f"Scene {scene.scene_index} has no uploaded image")
+                elif not Path(scene.uploaded_image_path).exists():
+                    missing.append(f"Scene {scene.scene_index} image file missing on disk")
+            if missing:
+                raise RenderingError("; ".join(missing))
+
+            voiceover_path = render.voiceover_path
+            if not voiceover_path or not Path(voiceover_path).exists():
+                raise RenderingError(f"Voiceover file missing on disk: {voiceover_path}")
+
+            storage = ProjectStorage(project.id)
+            subtitle_path = storage.get_subtitle_path()
+            _generate_whisper_subtitles(voiceover_path, subtitle_path, language=project.subtitle_language)
+            render.subtitle_path = str(subtitle_path)
+            logger.info("Whisper subtitles generated: %s", subtitle_path)
+
+            time_boundaries = _scene_time_boundaries(scenes, voiceover_path)
+
+            size = IMAGE_STORY_RESOLUTION
+            image_clips = []
+            for scene, start, end in time_boundaries:
+                duration = end - start
+                clip = _build_ken_burns_clip(scene.uploaded_image_path, duration, size)
+                image_clips.append(clip)
+                logger.info("Built image clip for scene %d: duration=%.2fs", scene.scene_index, duration)
+
+            if not image_clips:
+                raise RenderingError("No image clips to render")
+
+            concatenated = concatenate_videoclips(image_clips, method="compose")
+            voiceover_audio = AudioFileClip(voiceover_path).subclipped(0, concatenated.duration)
+
+            music_path = render.music_path if render.music_path and Path(render.music_path).exists() else None
+            if not music_path:
+                music_path = _load_background_music(render.music_name)
+
+            if music_path:
+                music = _loop_audio_to_duration(AudioFileClip(music_path), concatenated.duration).with_volume_scaled(0.08)
+                final_audio = CompositeAudioClip([voiceover_audio, music])
+                final_video = concatenated.with_audio(final_audio)
+            else:
+                final_video = concatenated.with_audio(voiceover_audio)
+
+            raw_output = storage.get_render_path().with_stem("raw_render")
+            raw_output.parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                logger.info("Starting image story render with GPU acceleration (h264_nvenc)...")
+                final_video.write_videofile(
+                    str(raw_output),
+                    fps=30,
+                    codec="h264_nvenc",
+                    audio_codec="aac",
+                    preset="p4",
+                    threads=4,
+                    logger=None,
+                )
+            except Exception as exc:
+                logger.warning("GPU render failed, falling back to CPU (libx264). Error: %s", exc)
+                final_video.write_videofile(
+                    str(raw_output),
+                    fps=30,
+                    codec="libx264",
+                    audio_codec="aac",
+                    preset="superfast",
+                    threads=4,
+                    logger=None,
+                )
+
+            output = storage.get_render_path()
+            if project.subtitles_enabled and render.subtitle_path and Path(render.subtitle_path).exists():
+                try:
+                    _burn_subtitles_ffmpeg(
+                        input_path=raw_output,
+                        subtitle_path=Path(render.subtitle_path),
+                        output_path=output,
+                        video_format="long",
+                    )
+                    raw_output.unlink(missing_ok=True)
+                except RenderingError as exc:
+                    logger.error("Subtitle burn failed for image story, using raw video: %s", exc)
+                    raw_output.rename(output)
+                    render.subtitle_path = None
+            else:
+                raw_output.rename(output)
+
+            render.render_path = str(output)
+            render.render_status = "complete"
+            project.status = ProjectStatus.complete.value
+            project.current_stage = "render"
+            logger.info("Image story project %d rendered successfully", project_id)
+        except Exception as exc:
+            logger.exception("Image story render failed for project %d", project_id)
             render.render_status = "error"
             render.error_message = str(exc)
             project.status = ProjectStatus.error.value

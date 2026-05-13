@@ -20,11 +20,12 @@ import { Badge, Button, Panel, Skeleton } from "@/components/ui";
 import { ScriptStage } from "@/components/stages/ScriptStage";
 import { ScenesStage } from "@/components/stages/ScenesStage";
 import { ClipsStage } from "@/components/stages/ClipsStage";
+import { ImageScenesStage } from "@/components/stages/ImageScenesStage";
 import { VoiceStage } from "@/components/stages/VoiceStage";
 import { RenderStage } from "@/components/stages/RenderStage";
 import type { RunFn } from "@/components/stages/shared";
 
-const STAGE_ORDER = ["script", "scenes", "clips", "voiceover", "render"] as const;
+const STAGE_ORDER = ["script", "scenes", "clips", "image_upload", "voiceover", "render"] as const;
 type Stage = (typeof STAGE_ORDER)[number];
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
@@ -58,12 +59,6 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     return () => { active = false; };
   }, [projectId]);
 
-  useEffect(() => {
-    const status = project?.render?.render_status;
-    if (status !== "queued" && status !== "rendering") return;
-    const timer = window.setInterval(() => refresh().catch(() => undefined), 2500);
-    return () => window.clearInterval(timer);
-  }, [project?.render?.render_status, refresh]);
 
   const run: RunFn = async (label, action) => {
     setBusy(label);
@@ -85,7 +80,15 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     return <ProjectSkeleton />;
   }
 
-  const activeIndex = STAGE_ORDER.indexOf(project.current_stage as Stage);
+  // Normalize stage for image_story edge case where current_stage might be "clips"
+  const normalizedStage = (project.video_format === "image_story" && project.current_stage === "clips")
+    ? "image_upload"
+    : project.current_stage;
+  const rawActiveIndex = STAGE_ORDER.indexOf(normalizedStage as Stage);
+  // For image_story, clips stage is skipped so we adjust the active index for display
+  const activeIndex = project.video_format === "image_story" && rawActiveIndex > 1
+    ? rawActiveIndex - 1
+    : rawActiveIndex;
 
   return (
     <main className="min-h-screen bg-forge-bg selection:bg-forge-red/30">
@@ -112,7 +115,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </h1>
             <div className="flex flex-wrap gap-2">
               <Badge tone="red" className="bg-forge-red/5 border-forge-red/20 px-3">
-                {project.video_format === "shorts" ? "9:16 Vertical" : "16:9 Landscape"}
+                {project.video_format === "shorts" ? "9:16 Vertical" : project.video_format === "image_story" ? "Story / Cartoon" : "16:9 Landscape"}
               </Badge>
               <Badge tone="accent">{project.current_stage}</Badge>
               <Badge tone={project.video_length === "auto" ? "red" : "default"} className="capitalize">
@@ -162,12 +165,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             transition={{ delay: 0.1 }}
             className="space-y-6"
           >
-            <StepSidebar active={project.current_stage as WorkflowStage} />
+            <StepSidebar 
+              active={project.current_stage as WorkflowStage} 
+              video_format={project.video_format} 
+              onStepClick={(stage) => run(`Jumping to ${stage}`, () => api.jumpToStage(project.id, stage))}
+            />
             
           </motion.div>
 
           <div className="space-y-6">
-            {STAGE_ORDER.map((stage, index) => {
+            {STAGE_ORDER.filter((stage) => {
+              // For image_story, skip clips entirely and show image_upload instead
+              if (project.video_format === "image_story") return stage !== "clips";
+              // For non-image_story, skip image_upload
+              return stage !== "image_upload";
+            }).map((stage, index) => {
               const isPast = index < activeIndex;
               const isFuture = index > activeIndex;
 
@@ -255,6 +267,7 @@ function renderStageContent(
     case "script": return <ScriptStage {...props} />;
     case "scenes": return <ScenesStage {...props} />;
     case "clips": return <ClipsStage {...props} />;
+    case "image_upload": return <ImageScenesStage project={project} onProjectUpdate={(p) => run("image-scenes", async () => p)} />;
     case "voiceover": return <VoiceStage {...props} />;
     case "render": return <RenderStage {...props} />;
     default: return null;
@@ -266,6 +279,7 @@ function stageName(stage: string): string {
     script: "Script Design",
     scenes: "Visual Breakdown",
     clips: "Media Selection",
+    image_upload: "Image Prompts & Upload",
     voiceover: "Audio Forge",
     render: "Final Production",
   };

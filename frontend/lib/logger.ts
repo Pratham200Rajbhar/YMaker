@@ -13,17 +13,7 @@ class Logger {
   private buffer: LogEntry[] = [];
   private flushInterval = 5000; // 5 seconds
   private maxBufferSize = 50;
-  private timer: ReturnType<typeof setInterval> | null = null;
-
-  constructor() {
-    if (typeof window !== "undefined") {
-      this.startTimer();
-    }
-  }
-
-  private startTimer() {
-    this.timer = setInterval(() => this.flush(), this.flushInterval);
-  }
+  constructor() {}
 
   private async flush() {
     if (this.buffer.length === 0) return;

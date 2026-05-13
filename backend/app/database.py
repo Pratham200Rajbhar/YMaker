@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 
 from sqlalchemy import event, text
@@ -5,6 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 
 engine = create_engine(
@@ -48,11 +51,11 @@ def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
-    
-    # Simple migration for new columns
+
+    # Simple migration for new columns - only run if columns don't exist
     if settings.database_url.startswith("sqlite"):
         with engine.connect() as conn:
-            # Check for category column
+            # Check for category column in projects
             res = conn.execute(text("PRAGMA table_info(projects)"))
             columns = [row[1] for row in res.fetchall()]
             if "category" not in columns:
@@ -69,8 +72,20 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_api_key TEXT"))
                 conn.commit()
             if "nvidia_model" not in setting_columns:
-                conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_model TEXT NOT NULL DEFAULT 'meta/llama-3.1-405b-instruct'"))
+                conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_model TEXT NOT NULL DEFAULT ''"))
                 conn.commit()
             if "nvidia_tts_model" not in setting_columns:
                 conn.execute(text("ALTER TABLE settings ADD COLUMN nvidia_tts_model TEXT NOT NULL DEFAULT '877104f7-e885-42b9-8de8-f6e4c6303969'"))
                 conn.commit()
+
+            # Create indexes for better query performance
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at DESC)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_scenes_project_id ON scenes(project_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_clips_scene_id ON clips(scene_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_scripts_project_id ON scripts(project_id)"))
+                conn.commit()
+            except Exception as e:
+                # Index creation may fail if they already exist with different definitions
+                logging.getLogger(__name__).warning("Index creation failed (may already exist): %s", e)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Clip, Project, ProjectStatus, Scene, WorkflowStage
 from ..schemas import ProjectOut
-from ..services.ai import AiServiceError
+from ..services.ai import AiServiceError, score_clips_for_scene
 from ..services.clips import ClipServiceError, download_selected_clip, fetch_clip_options
 from ..utils import project_out
 
@@ -29,7 +29,9 @@ def fetch_clips(
     db: Session = Depends(get_db),
 ) -> ProjectOut:
     project = _project(db, project_id)
-    if not project.scenes or not all(scene.approved for scene in project.scenes):
+    if not project.scenes:
+        raise HTTPException(status_code=400, detail="Generate scenes before fetching clips")
+    if not all(scene.approved for scene in project.scenes):
         raise HTTPException(status_code=409, detail="Approve scenes before fetching clips")
 
     try:
@@ -213,7 +215,23 @@ def auto_select_clips(project_id: int, db: Session = Depends(get_db)) -> Project
         raise HTTPException(status_code=400, detail="No clips fetched yet")
 
     try:
-        selections = select_best_clips(scenes_data)
+        selections = []
+        for scene_data in scenes_data:
+            scene_id = scene_data["scene_id"]
+            candidates = scene_data["candidates"]
+            description = scene_data["description"]
+            visual_keyword = scene_data["visual_keyword"]
+            
+            if not candidates:
+                continue
+                
+            scored = score_clips_for_scene(description, visual_keyword, candidates)
+            if scored:
+                best = scored[0]
+                selections.append({
+                    "scene_id": scene_id,
+                    "selected_clip_id": best["clip_id"]
+                })
     except AiServiceError as exc:
         raise HTTPException(status_code=502, detail=f"AI selection failed: {exc}") from exc
 

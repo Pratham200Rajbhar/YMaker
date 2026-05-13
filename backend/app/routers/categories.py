@@ -15,7 +15,8 @@ DEFAULT_CATEGORIES = [
     "Health & Fitness",
     "Travel",
     "Food & Cooking",
-    "Technology"
+    "Technology",
+    "Story / Cartoon"
 ]
 
 @router.get("", response_model=list[str])

@@ -4,40 +4,58 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-VideoFormat = Literal["shorts", "long"]
+VideoFormat = Literal["shorts", "long", "image_story"]
 VideoLength = Literal["auto", "short", "medium", "long"]
 
 
 class ProjectCreate(BaseModel):
-    idea: str = Field(min_length=5)
-    category: str = "General"
+    idea: str = Field(min_length=5, max_length=5000)
+    category: str = Field(default="General", max_length=60)
     video_format: VideoFormat
     video_length: VideoLength = "auto"
-    language: str = "english"
+    language: str = Field(default="english", max_length=20)
     subtitles_enabled: bool = True
-    subtitle_language: str = "english"
+    subtitle_language: str = Field(default="english", max_length=20)
     # Valid values: "pexels", "pixabay", "coverr", "mixkit", "free", "hybrid"
-    clip_provider: str | None = None
+    clip_provider: str | None = Field(default=None, max_length=20)
 
 
 class ScriptUpdate(BaseModel):
-    video_script: str
-    on_screen_notes: str = ""
-    title_suggestions: list[str] = []
-    description: str | None = None
-    tags: list[str] = []
-    chapters: list[str] = []
-    hook_type: str | None = None
-    estimated_duration: str = ""
-    tone: str = ""
+    video_script: str = Field(max_length=50000)
+    on_screen_notes: str = Field(default="", max_length=10000)
+    title_suggestions: list[str] = Field(default=[], max_length=5)
+    description: str | None = Field(default=None, max_length=5000)
+    tags: list[str] = Field(default=[], max_length=20)
+    chapters: list[str] = Field(default=[], max_length=20)
+    hook_type: str | None = Field(default=None, max_length=60)
+    estimated_duration: str = Field(default="", max_length=80)
+    tone: str = Field(default="", max_length=120)
 
 
 class SceneUpdate(BaseModel):
-    description: str | None = None
-    visual_keyword: str | None = None
-    duration_seconds: float | None = None
-    voiceover_text: str | None = None
+    description: str | None = Field(default=None, max_length=10000)
+    visual_keyword: str | None = Field(default=None, max_length=160)
+    duration_seconds: float | None = Field(default=None, ge=0.1, le=300)
+    voiceover_text: str | None = Field(default=None, max_length=5000)
     approved: bool | None = None
+
+
+class SceneImagePromptUpdate(BaseModel):
+    image_prompt: str
+    image_prompt_approved: bool = False
+
+
+class SceneVoiceAssign(BaseModel):
+    character_voice: str
+
+
+class SceneImageUrlUpload(BaseModel):
+    url: str
+
+
+class MultiVoiceGenerate(BaseModel):
+    default_voice: str
+    scene_voices: dict[int, str] = {}
 
 
 class ScriptOut(BaseModel):
@@ -79,6 +97,11 @@ class SceneOut(BaseModel):
     voiceover_text: str
     approved: bool
     clips: list[ClipOut] = []
+    image_prompt: str | None = None
+    image_prompt_approved: bool = False
+    uploaded_image_path: str | None = None
+    image_ready: bool = False
+    character_voice: str | None = None
 
 
 class RenderOut(BaseModel):

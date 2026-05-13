@@ -1,17 +1,20 @@
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pythonjsonlogger import jsonlogger
+from sqlalchemy import text
 
 from .config import STORAGE_DIR, LOG_FILE, ensure_storage_dirs, settings
 from .database import init_db
 from .routers import (
     ai,
     clips,
+    image_scenes,
     projects,
     render,
     scenes,
@@ -66,14 +69,29 @@ def setup_logging():
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-    # CORS
+    # CORS - validate frontend_origin to prevent misconfiguration
+    allowed_origins = [settings.frontend_origin]
+    # Only allow localhost in development for safety
+    if "localhost" in settings.frontend_origin or "127.0.0.1" in settings.frontend_origin:
+        allowed_origins.append("http://127.0.0.1:3000")
+        allowed_origins.append("http://localhost:3000")
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.frontend_origin, "http://127.0.0.1:3000"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["Content-Type", "Authorization"],
     )
+
+    # Request ID middleware for tracing
+    @app.middleware("http")
+    async def add_request_id(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
     # Request logging middleware
     @app.middleware("http")
@@ -81,6 +99,7 @@ def create_app() -> FastAPI:
         start = time.time()
         
         # Capture request details
+        request_id = getattr(request.state, "request_id", "unknown")
         path = request.url.path
         method = request.method
         client_ip = request.client.host if request.client else "unknown"
@@ -90,6 +109,7 @@ def create_app() -> FastAPI:
             duration = (time.time() - start) * 1000
             
             log_data = {
+                "request_id": request_id,
                 "method": method,
                 "path": path,
                 "status_code": response.status_code,
@@ -122,6 +142,7 @@ def create_app() -> FastAPI:
                 method,
                 path,
                 extra={
+                    "request_id": request_id,
                     "method": method,
                     "path": path,
                     "duration_ms": round(duration, 2),
@@ -133,6 +154,7 @@ def create_app() -> FastAPI:
 
     # Static files
     app.mount("/media", StaticFiles(directory=STORAGE_DIR), name="media")
+    app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
 
     # Routers
     app.include_router(projects.router)
@@ -140,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(scripts.router)
     app.include_router(scenes.router)
     app.include_router(clips.router)
+    app.include_router(image_scenes.router)
     app.include_router(voice.router)
     app.include_router(render.router)
     app.include_router(settings_router.router)
@@ -147,8 +170,36 @@ def create_app() -> FastAPI:
     app.include_router(logs.router)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "app": settings.app_name}
+    def health() -> dict[str, str | bool]:
+        """Health check endpoint with dependency status."""
+        health_status = {
+            "status": "ok",
+            "app": settings.app_name,
+            "database": False,
+            "storage": False,
+        }
+        
+        # Check database connection
+        try:
+            from .database import engine
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            health_status["database"] = True
+        except Exception as e:
+            logger.error("Health check: Database connection failed: %s", e)
+            health_status["status"] = "degraded"
+        
+        # Check storage directory
+        try:
+            health_status["storage"] = STORAGE_DIR.exists() and STORAGE_DIR.is_dir()
+            if not health_status["storage"]:
+                logger.error("Health check: Storage directory not accessible")
+                health_status["status"] = "degraded"
+        except Exception as e:
+            logger.error("Health check: Storage check failed: %s", e)
+            health_status["status"] = "degraded"
+        
+        return health_status
 
     return app
 

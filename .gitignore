@@ -53,4 +53,6 @@ logs/
 backend/models_data/
 *.onnx
 
-/storage/
+# Project generated artifacts
+output/
+backend/storage/

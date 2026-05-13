@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Check, RefreshCw } from "lucide-react";
+import { Play, Check, RefreshCw, Mic } from "lucide-react";
 import { motion } from "framer-motion";
 import { api, mediaUrl } from "@/lib/api";
 import { Button, Field, Badge, inputClass } from "@/components/ui";
@@ -16,6 +16,7 @@ const VOICES = [
 export function VoiceStage({ project, busy, run, readOnly, providerLabel }: StageProps) {
   const [voice, setVoice] = useState(project.render?.voice_name ?? VOICES[0]);
   const audio = mediaUrl(project.render?.voiceover_path);
+  const isImageStory = project.video_format === "image_story";
 
   if (readOnly) {
     return (
@@ -38,7 +39,18 @@ export function VoiceStage({ project, busy, run, readOnly, providerLabel }: Stag
           <Button
             className="h-9 border border-forge-border bg-forge-panel text-zinc-400 hover:text-white"
             busy={busy === "voice"}
-            onClick={() => run("voice", () => api.generateVoiceover(project.id, voice))}
+            onClick={() => {
+              if (isImageStory) {
+                const sceneVoices = Object.fromEntries(
+                  project.scenes
+                    .filter((s) => s.character_voice)
+                    .map((s) => [s.scene_index, s.character_voice])
+                );
+                run("voice", () => api.generateMultiVoice(project.id, { default_voice: voice, scene_voices: sceneVoices }));
+              } else {
+                run("voice", () => api.generateVoiceover(project.id, voice));
+              }
+            }}
           >
             <RefreshCw className="h-3.5 w-3.5" /> Regenerate Audio
           </Button>
@@ -55,7 +67,7 @@ export function VoiceStage({ project, busy, run, readOnly, providerLabel }: Stag
         providerLabel={providerLabel}
       />
       <div className="grid gap-6 md:grid-cols-[1fr_200px]">
-        <Field label="AI Voice Model">
+        <Field label={isImageStory ? "Default Voice" : "AI Voice Model"}>
           <select
             className={`${inputClass} appearance-none cursor-pointer`}
             value={voice}
@@ -70,7 +82,18 @@ export function VoiceStage({ project, busy, run, readOnly, providerLabel }: Stag
           <Button
             className="w-full bg-forge-panel border border-forge-border text-white hover:bg-forge-panel2"
             busy={busy === "voice"}
-            onClick={() => run("voice", () => api.generateVoiceover(project.id, voice))}
+            onClick={() => {
+              if (isImageStory) {
+                const sceneVoices = Object.fromEntries(
+                  project.scenes
+                    .filter((s) => s.character_voice)
+                    .map((s) => [s.scene_index, s.character_voice])
+                );
+                run("voice", () => api.generateMultiVoice(project.id, { default_voice: voice, scene_voices: sceneVoices }));
+              } else {
+                run("voice", () => api.generateVoiceover(project.id, voice));
+              }
+            }}
           >
             {audio ? (
               <>
@@ -84,9 +107,40 @@ export function VoiceStage({ project, busy, run, readOnly, providerLabel }: Stag
           </Button>
         </div>
       </div>
-      
+
+      {/* Multi-voice assignments for image_story */}
+      {isImageStory && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6 rounded-2xl border border-forge-border bg-forge-panel/40 p-5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Mic className="h-4 w-4 text-forge-red" />
+            <h3 className="text-sm font-bold text-white">Per-Scene Voice Assignments</h3>
+          </div>
+          <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+            {project.scenes.map((scene) => (
+              <div key={scene.id} className="flex items-center justify-between rounded-lg bg-forge-bg/50 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Badge tone="accent" className="text-[9px]">Scene {scene.scene_index + 1}</Badge>
+                  <span className="text-xs text-zinc-400 truncate max-w-[200px]">{scene.description}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {scene.character_voice ? (
+                    <Badge tone="green" className="text-[9px]">{scene.character_voice}</Badge>
+                  ) : (
+                    <span className="text-[10px] text-zinc-600 italic">Using default voice</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       {audio ? (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="mt-8 rounded-2xl bg-black/40 p-6 border border-white/5"

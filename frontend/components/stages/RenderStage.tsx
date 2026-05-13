@@ -77,7 +77,13 @@ export function RenderStage({ project, busy, run, readOnly, providerLabel }: Sta
                 className="w-full bg-gradient-to-r from-forge-red to-forge-red2 text-white shadow-xl shadow-forge-red/20 hover:scale-[1.02]"
                 busy={busy === "render"}
                 disabled={isRendering}
-                onClick={() => run("render", () => api.startRender(project.id))}
+                onClick={() => {
+                  if (project.video_format === "image_story") {
+                    run("render", () => api.startImageStoryRender(project.id));
+                  } else {
+                    run("render", () => api.startRender(project.id));
+                  }
+                }}
               >
                 <Wand2 className="h-4 w-4" /> 
                 {status === "complete" ? "Regenerate Video" : "Start Rendering"}

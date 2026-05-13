@@ -1,66 +1,57 @@
-import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength, Settings } from "./types";
+import type { Project, ProjectListItem, Script, Scene, VideoFormat, VideoLength, Settings, ImageProgress } from "./types";
 import { logger } from "./logger";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-
-const MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 800;
-
-async function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? (typeof window !== "undefined" ? `http://${window.location.hostname}:8000` : "http://localhost:8000");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let lastError: Error | null = null;
+  const headers = new Headers(init?.headers);
+  const isFormData = init?.body instanceof FormData;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const res = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {}),
-        },
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: res.statusText }));
-        const errorMsg = body.detail ?? `HTTP ${res.status}: ${res.statusText}`;
-        logger.error(`API Request failed: ${init?.method ?? "GET"} ${path}`, {
-          status: res.status,
-          statusText: res.statusText,
-          error: errorMsg,
-          attempt,
-        });
-        throw new Error(errorMsg);
-      }
-
-      // Handle 204 No Content and empty body responses
-      if (res.status === 204) {
-        return undefined as T;
-      }
-      const text = await res.text();
-      if (!text) {
-        return undefined as T;
-      }
-      return JSON.parse(text) as T;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      // Don't retry client errors (4xx) except 408/429
-      if (err instanceof Error && err.message.includes("HTTP 4")) {
-        const status = parseInt(err.message.match(/HTTP (\d+)/)?.[1] ?? "0", 10);
-        if (status !== 408 && status !== 429) {
-          throw err;
-        }
-      }
-      if (attempt < MAX_RETRIES) {
-        await sleep(RETRY_DELAY_MS * (attempt + 1));
-      }
-    }
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
-  throw lastError ?? new Error("Request failed after retries");
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    let errorDetail: any;
+    try {
+      errorDetail = await res.json();
+    } catch {
+      errorDetail = await res.text().catch(() => res.statusText);
+    }
+
+    let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+    if (errorDetail && typeof errorDetail === "object" && errorDetail.detail) {
+      errorMsg = Array.isArray(errorDetail.detail)
+        ? errorDetail.detail.map((e: any) => e.msg).join(", ")
+        : String(errorDetail.detail);
+    } else if (typeof errorDetail === "string" && errorDetail) {
+      errorMsg = errorDetail;
+    }
+
+    logger.error(`API Request failed: ${init?.method ?? "GET"} ${path}`, {
+      status: res.status,
+      statusText: res.statusText,
+      error: errorDetail,
+      message: errorMsg,
+    });
+    throw new Error(errorMsg);
+  }
+
+  // Handle 204 No Content and empty body responses
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export const api = {
@@ -70,6 +61,7 @@ export const api = {
     request<Project>("/projects", { method: "POST", body: JSON.stringify({ idea, category, video_format, video_length, language, subtitles_enabled, subtitle_language }) }),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
+  jumpToStage: (projectId: number, stage: WorkflowStage) => request<Project>(`/projects/${projectId}/jump/${stage}`, { method: "POST" }),
   optimizeIdea: (idea: string) =>
     request<{ optimized_idea: string }>("/ai/optimize-idea", {
       method: "POST",
@@ -118,6 +110,37 @@ export const api = {
 
   startRender: (id: number) =>
     request<Project>(`/projects/${id}/render/start`, { method: "POST" }),
+
+  // Image Story
+  generateImagePrompts: (id: number) =>
+    request<Project>(`/projects/${id}/image-scenes/generate-prompts`, { method: "POST" }),
+  updateImagePrompt: (projectId: number, sceneId: number, data: { image_prompt: string; image_prompt_approved: boolean }) =>
+    request<Scene>(`/projects/${projectId}/image-scenes/${sceneId}/prompt`, { method: "PUT", body: JSON.stringify(data) }),
+  uploadSceneImage: (projectId: number, sceneId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Scene>(`/projects/${projectId}/image-scenes/${sceneId}/upload-image`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  uploadSceneImageByUrl: (projectId: number, sceneId: number, url: string) =>
+    request<Scene>(`/projects/${projectId}/image-scenes/${sceneId}/upload-image-by-url`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  deleteSceneImage: (projectId: number, sceneId: number) =>
+    request<Scene>(`/projects/${projectId}/image-scenes/${sceneId}/image`, { method: "DELETE" }),
+  getImageProgress: (id: number) =>
+    request<ImageProgress>(`/projects/${id}/image-scenes/progress`),
+  assignSceneVoice: (projectId: number, sceneId: number, data: { character_voice: string }) =>
+    request<Scene>(`/projects/${projectId}/image-scenes/${sceneId}/assign-voice`, { method: "PUT", body: JSON.stringify(data) }),
+  approveImages: (id: number) =>
+    request<Project>(`/projects/${id}/image-scenes/approve-images`, { method: "POST" }),
+  generateMultiVoice: (id: number, data: { default_voice: string; scene_voices: Record<number, string> }) =>
+    request<Project>(`/projects/${id}/voiceover/generate-multivoice`, { method: "POST", body: JSON.stringify(data) }),
+  startImageStoryRender: (id: number) =>
+    request<Project>(`/projects/${id}/render/start-image-story`, { method: "POST" }),
 
   // Settings
   getSettings: () => request<Settings>("/settings"),

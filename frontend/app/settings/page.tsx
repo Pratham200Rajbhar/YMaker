@@ -32,7 +32,6 @@ export default function SettingsPage() {
       const updated = await api.updateSettings({ ...settings, llm_provider: providerId });
       setSettings(updated);
       setSuccess(`${providerId.toUpperCase()} set as active provider`);
-      setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update provider");
     } finally {
